@@ -1,0 +1,57 @@
+ --- Custom Memory Generator ---
+
+ - here I will lay out all of the logic that exists within this cutie patootie of a project 
+
+-- what will be used in this project --
+
+ - VirtualAlloc/Free --> windows header from microsoft to allocate pages the size of 4KB / 4096B directly from heap
+ - LinkedList--> to store structs of pages to mimic a chain of pages that will store blocks of memory, it will be a struct where
+    at each start of the page there will be the pointer to the next page along with some more info. at the end we will mention the struct
+    - the blocks of memory will be basically a piece of that same page, and so every page will have metadata at the start(MemBlock Struct)
+        - 1.char free - '1' for free and '-1' for not free
+        - 2.nextPtr - the pointer to the next block / position that can contain a block
+    - every single page will have additional metadata at the start of it(PageNode struct):
+        - 1. still thinkin
+
+
+
+
+--- function list for all of the project + a detailed explanation about each of them ---
+
+ - in the project we will have the following type of functions:
+    - functions for getting information about current/previous/next position of a Page or a memory block
+
+
+-- helper functions --
+
+ - void* getCurrPage(void *ptr) --> this function will recieve a pointer, and by the ptr's memory value(where it points to), we can determine 
+    the page by its chronological position , lets say the very start of the linked list of pages is 9000 bytes from the received pointer,
+    we can assume that the page we are in, is the second page in order, and so we can use the linked list pointer to go over to the second page and 
+    return its currPtr of the start of the block.
+        -- important points --
+        - we will have to track the very first pointer to the very firstPage along the whole code
+        - we will return null if there is no current page, and we will create a new page right after that (the first page)
+
+- void* getPreviousPage(void *ptr) --> relies on the similiar data we have just as the previous function butt there are some neuances:
+        -- important points --
+        - we will of course have to track down the first page
+        - we will also HAVE to have checks that if there is no previous page
+        - we will return null if there is no previous page
+
+- void* getNextPage(void *ptr) --> literally just like the previous function except we gotta make sure there is a nextpage, return null otherwise
+
+
+-- memory aligment function/s --
+
+- size_t alignMemorySize(size_t requestedSize) --> the function takes any requested size_t of bytes, and aligns it to be devidable by 8, this makes it
+    so every block we received can be precisely aligned by only 8 bit jumps, so requesting 14 bytes becomes 16 (not including metadata)
+
+
+-- function for scanning for enough unoccupied memmory to fit the userdata + metadata there --
+
+- void* scanForFreeMemmorySpace(size_t requestedSize) --> the function will go over every single page in a chain-like way
+
+
+-- deleting functions --
+        
+
