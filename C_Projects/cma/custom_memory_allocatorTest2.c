@@ -167,7 +167,13 @@ long long spaceLeftInMemBlock(PageNode* page, uintptr_t ptr, size_t requestedSiz
 {
     MemBlock* currBlock = (MemBlock*)ptr;
     long long totalSpaceAccumulated = 0;
-
+    // printf("PageInfo: POINTER: -  %p SIZE -- free bytes left: %lld bytes Size requested: -- %zu bytes - \n", (void*)page->currPagePtr,(long long)page->freeBytesLeft, requestedSize);  
+    // printf("[BLOCK] Addr: %p | Free: %s | Size: %lld | Next: %p | Data Starts: %p\n", 
+        // (void*)currBlock, 
+        // currBlock->free ? "YES" : "NO ", 
+        // currBlock->size, 
+        // currBlock->nextMemBlock,
+        // (void*)((uintptr_t)currBlock + alignMemorySize(sizeof(MemBlock))));  
     // We only want to "bridge" blocks if they are consecutive and FREE
     while(currBlock != NULL && currBlock->free)
     {
@@ -230,37 +236,27 @@ void* allocateMemBlock(PageNode* page,size_t requestedSize)
     MemBlock* prev = NULL; //NOTE: previous of the first free block, not curr
     MemBlock* curr = (MemBlock*)((uintptr_t)(page->currPagePtr + sizeof(PageNode)));//first block
     MemBlock* firstFreeBlock = curr;
-    size_t freeBytesSequence = 0;
     long long availableSpace = 0;//here we store the spaceLeftInMemBlock result
 
-    printf("\n--- Scanning Page %p for %zu bytes ---\n", (void*)page->currPagePtr, requestedSize);
+    // printf("\n--- Scanning Page %p for %zu bytes ---\n", (void*)page->currPagePtr, requestedSize);
 
     while(curr != NULL)
     {
         availableSpace = spaceLeftInMemBlock(page,(uintptr_t)(firstFreeBlock),requestedSize);
-        freeBytesSequence += availableSpace;
 
-        if(curr->size == -1)
-        {
-            if(freeBytesSequence < alignMemorySize(requestedSize))
-            {
-                return NULL;
-            }
-        }
-
-        printf("[DEBUG] Block: %p | Free: %d | Size: %lld | Total Seq: %lld\n", 
-                (void*)curr, curr->free, curr->size, (long long)(freeBytesSequence));
+        // printf("[DEBUG] Block: %p | Free: %d | Size: %lld | Total Seq: %lld\n", 
+                // (void*)curr, curr->free, curr->size, (long long)(availableSpace));
 
         if(curr->free)
         {
             if(availableSpace == -9999)
             {
-                printf("[DEBUG] !! Boundary Error (-9999)\n");
+                // printf("[DEBUG] !! Boundary Error (-9999)\n");
                 return NULL;
             } //error code for no space in page
-            if(alignMemorySize(requestedSize) > freeBytesSequence)//if there is no space available inside the memmory block
+            if(alignMemorySize(requestedSize) > availableSpace)//if there is no space available inside the memmory block
             {
-                printf("[DEBUG] Small block, adding to sequence...\n");
+                // printf("[DEBUG] Small block, adding to sequence...\n");
                 curr = (MemBlock*)curr->nextMemBlock;
             }
             else //if there is space in that memmory block (good spot found!!)- maybe we will split memmory blocks here(we take in the fact the memmory block can be the first)
@@ -270,10 +266,12 @@ void* allocateMemBlock(PageNode* page,size_t requestedSize)
 
                 // WORTHINESS PROTOCOL: (check if splittable)
                 // We need room for: Aligned Request + New Header + Minimum Payload (8)
-                if(freeBytesSequence >= (long long)(alignedReq + alignMemorySize(sizeof(MemBlock)) + 8))
+                if(availableSpace >= (long long)(alignedReq + alignMemorySize(sizeof(MemBlock)) + 8))
                 {
-                    printf("[DEBUG] >> ACTION: SPLITTING at %p\n", (void*)firstFreeBlock);
+                    // printf("[DEBUG] >> ACTION: SPLITTING at %p\n", (void*)firstFreeBlock);
                     // 1. Configure the current block for the user
+                    void* originalNext = firstFreeBlock->nextMemBlock;
+
                     firstFreeBlock->free = false;
                     firstFreeBlock->size = (long long)alignedReq;
 
@@ -296,7 +294,7 @@ void* allocateMemBlock(PageNode* page,size_t requestedSize)
                     // 4. Initialize the new recycled block
                     newBlock->currMemBlock = (void*)nextHeaderAddr;
                     newBlock->size = -1;
-                    newBlock->nextMemBlock = firstFreeBlock->nextMemBlock;
+                    newBlock->nextMemBlock = originalNext;
                     newBlock->free = true;
 
                     // Update page metadata
@@ -307,9 +305,9 @@ void* allocateMemBlock(PageNode* page,size_t requestedSize)
                 }
                 else //not worth splitting - just give the user the extra bytes (less than 40 usually)
                 {
-                    printf("[DEBUG] >> ACTION: ABSORBING into %p (Too small to split)\n", (void*)firstFreeBlock);
+                    // printf("[DEBUG] >> ACTION: ABSORBING into %p (Too small to split)\n", (void*)firstFreeBlock);
                     firstFreeBlock->free = false; //now its occupied
-                    firstFreeBlock->size = freeBytesSequence + availableSpace; //the total size of the whole thing - we will give the user some extra bytes - won't exceed 40-30
+                    firstFreeBlock->size = availableSpace; //the total size of the whole thing - we will give the user some extra bytes - won't exceed 40-30
                     MemBlock* prevBlock = (MemBlock*)findPreviousMemBlock(page,(uintptr_t)firstFreeBlock);
                     if(prevBlock != NULL)   
                     {
@@ -327,7 +325,7 @@ void* allocateMemBlock(PageNode* page,size_t requestedSize)
                         nextBlock->size = -1;
                         nextBlock->free = true;
                         }
-                        page->freeBytesLeft -= freeBytesSequence;
+                        page->freeBytesLeft -= availableSpace;
                         return (void*)((uintptr_t)firstFreeBlock + alignMemorySize(sizeof(MemBlock)));
                     }
                 }
@@ -335,84 +333,16 @@ void* allocateMemBlock(PageNode* page,size_t requestedSize)
         }
         else//if the memmory block isn't free
         {
-            printf("[DEBUG] Block occupied, skipping...\n");
-            freeBytesSequence = 0;
+            // printf("[DEBUG] Block occupied, skipping...\n");
+            availableSpace = 0;
             prev = curr;
             curr = (MemBlock*)curr->nextMemBlock;
             firstFreeBlock = curr;
 
         }
         
-        // if(curr->nextMemBlock == NULL) { //last mem block
-        //     uintptr_t nextPos = 0;
-        //     size_t alignedReq = alignMemorySize(requestedSize);
-        //     if(curr->size == -1) freeBytesSequence += spaceLeft(page,curr,alignedReq);
-        //     else  freeBytesSequence += curr->size;
-            
-        //     if(freeBytesSequence < alignedReq) return NULL;
-        //     nextPos = (uintptr_t)(curr) + alignMemorySize(sizeof(MemBlock)) + freeBytesSequence;
-        //     //add the part that goes from the worthness protocol
-        //     if(freeBytesSequence >= (long long)(alignedReq + alignMemorySize(sizeof(MemBlock)) + 8))
-        //     {
-        //         printf("[DEBUG] >> ACTION: SPLITTING at %p\n", (void*)firstFreeBlock);
-        //         // 1. Configure the current block for the user
-        //         firstFreeBlock->free = false;
-        //         firstFreeBlock->size = (long long)alignedReq;
-
-        //         // 2. Calculate the position of the NEW recycled header
-        //         // We move past our current header and our data payload
-        //         uintptr_t nextHeaderAddr = (uintptr_t)firstFreeBlock + alignMemorySize(sizeof(MemBlock)) + firstFreeBlock->size;
-                
-        //         MemBlock* newBlock = (MemBlock*)nextHeaderAddr;
-                
-        //         // 3. THE STITCH: Link the new block into the chain
-        //         newBlock->nextMemBlock = curr->nextMemBlock; // Keep the original chain intact
-        //         firstFreeBlock->nextMemBlock = (void*)newBlock;
-        //         MemBlock* prevBlock = (MemBlock*)findPreviousMemBlock(page,(uintptr_t)firstFreeBlock);
-        //         if(prevBlock != NULL)   prevBlock->nextMemBlock = (void*)firstFreeBlock;
-            
-        //         // 4. Initialize the new recycled block
-        //         newBlock->currMemBlock = (void*)nextHeaderAddr;
-        //         newBlock->size = -1;
-        //         newBlock->nextMemBlock = firstFreeBlock->nextMemBlock;
-        //         newBlock->free = true;
-
-        //         // Update page metadata
-        //         page->freeBytesLeft -= (alignedReq + alignMemorySize(sizeof(MemBlock)));
-
-        //         return (void*)((uintptr_t)firstFreeBlock + alignMemorySize(sizeof(MemBlock)));
-
-        //     }
-        //     else //not worth splitting - just give the user the extra bytes (less than 40 usually)
-        //     {
-        //         printf("[DEBUG] >> ACTION: ABSORBING into %p (Too small to split)\n", (void*)firstFreeBlock);
-        //         firstFreeBlock->free = false; //now its occupied
-        //         firstFreeBlock->size = freeBytesSequence + availableSpace; //the total size of the whole thing - we will give the user some extra bytes - won't exceed 40-30
-        //         MemBlock* prevBlock = (MemBlock*)findPreviousMemBlock(page,(uintptr_t)firstFreeBlock);
-        //         if(prevBlock != NULL)   prevBlock->nextMemBlock = (void*)firstFreeBlock;//assign the next ptr to the prev if it exists
-        //         // if (prev->free && prevBlock != NULL) prev->size = (long long)(((uintptr_t)(firstFreeBlock) - (uintptr_t)(prev)) - alignMemorySize(sizeof(MemBlock)));
-                
-        //         if(spaceLeft(page,(uintptr_t)(firstFreeBlock + firstFreeBlock->size),MIN_SPLIT_SIZE) >= MIN_SPLIT_SIZE)//check if we can add a next ptr(all we need is to make sure here that the block will be usable - is the min size or above)
-        //         {
-                    
-        //             firstFreeBlock->nextMemBlock = (void*)((uintptr_t)(firstFreeBlock + firstFreeBlock->size));
-        //             MemBlock* nextBlock = (MemBlock*)(firstFreeBlock->nextMemBlock);
-        //             if(nextBlock->size == -1) //check if the next block needs pre-configuration:
-        //             {
-        //             //assign unconfigured flags
-        //             nextBlock->size = -1;
-        //             nextBlock->free = true;
-        //             }
-        //             page->freeBytesLeft -= freeBytesSequence;
-        //             return (void*)((uintptr_t)firstFreeBlock + alignMemorySize(sizeof(MemBlock)));
-        //         }
-            // }
-
-
-
-        // }
     }
-    printf("[DEBUG] !! Page Full/End reached\n");
+    // printf("[DEBUG] !! Page Full/End reached\n");
     return NULL;
 }
 
@@ -461,7 +391,7 @@ void* miron_malloc(size_t size) {
     // 1. If we have no pages, make one!
     if (firstPage == NULL) {
         firstPage = (PageNode*)allocatePage();
-        printf("new Page initialised because it is the first\n");
+        // printf("new Page initialised because it is the first\n");
     }
 
     // 2. Try to allocate in existing pages
@@ -474,65 +404,9 @@ void* miron_malloc(size_t size) {
         if (curr->nextPageNode == NULL) {
             // 4. We hit the end and still no space? Create a new page!
             curr->nextPageNode = allocatePage();
-            printf("new Page is initialised because all the pages are taken\n");
+            // printf("new Page is initialised because all the pages are taken\n");
         }
         curr = (PageNode*)curr->nextPageNode;
     }
     return NULL; 
 }
-
-
-//testing space
-int main()
-{
-    void* ptr1 = miron_malloc(16);
-    void* ptr2 = miron_malloc(32);
-    void* ptr3 = miron_malloc(64);
-
-    printf("Ptr1: %p\nPtr2: %p\nPtr3: %p\n", ptr1, ptr2, ptr3);
-    // printf("%zu",alignMemorySize(sizeof(PageNode)));
-    return 0;
-}
-
-/*
-thinking zone:
-
-all things to take into account(logic):
-
-procedure with handling each request:
-Loop through each and every page that we have to check until we find an available spot
-    in every page:
-        - we start from the first mem block of the page
-            - we have a prev = null and a current memblock pointers
-            - we have a mem block that will save the first free block from the start of the sequence
-            - when we reach a mem block with current:
-                - if the block is free, we add the amount of bytes it can potentially provide
-                  to a counter of free bytes (using a function)
-                - if the blocks size is -1 -> its unconfigured.. so we calculate 
-                  how much it can provide us (using the same function as before) which is the distance between the start of it and the end of the page (byte 4088)
-                  - we will have a flag to handle the special procedure for the physically last mem block/s
-                - if we get to a certain curr block - and we get to a point where the free bytes it gave is sufficient
-                  we will always take in mind - the start of the first free block and the end of curr
-                - if we are still not enough in bytes - we will check for void bytes - which essentially means 
-                  if there are leftover and untouched bytes between two memmory blocks - the curr and next one
-
-
-functions to have:
- - a function that can return the amount of space available from the firstFreeMemBlock to the last available byte in the row incuding the requested mem block(leftover size)
-    it will return -9999 if there is no more space left to even fit the mem block 
-    it will return a negative number(the amount insufficient number of bytes)
-    it will return 0 or above if there is enough space to store the mem block in the currently scanned region(firstFreeMemBlock --> currBlock->nextPtr - 1)
-
- - a function that will 
-
-in every single situation no matter what we have to:
-
-1.we will have to track the previous node -> the previous one to the firstFreeMemBlock
-2.we will handle being aware of not over-allocating bytes in memmory blocks and split memmory blocks into multiple for recycling
-
-if nothing special happens:
-    we check if the current range from firstFreeMemBlock to currBlock + its end
-    is sufficient + is within the bound of the page + when we add the void spots from in between.
-if we meet the last memBlock (size = -1):
-    first we check if the          
-*/
