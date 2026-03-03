@@ -22,15 +22,15 @@ typedef struct ShellCommand{
 typedef struct CommandRule{
     const char* name;
     const char* allowedFlags; // Example: "-alo"
-    const char* path1Requirements; //'F' for not allowed, 'T' for requried and 'O' for optional + 'D' for directory and 'F' for a file
+    const char* path1Requirements; //'F' for not allowed, 'T' for requried and 'O' for optional + 'D' for directory and 'F' for a file + 'N' for a new directory and 'E' for existing path required 
     const char* path2Requirements;//same with pathRequired
 } CommandRule;
 
 static const CommandRule COMMAND_DB[] = {
-    {"ls", "alo","OD","FF"},
-    {"cd", "","TD","FF"},
-    {"mkdir", "p","TD","FF"},
-    {"exit", "","FF","FF"}
+    {"ls", "alo","ODE","FFE"},
+    {"cd", "","TDE","FFE"},
+    {"mkdir", "p","TDN","FFN"},
+    {"exit", "","FFE","FFE"}
 };
 
 #define DB_SIZE (sizeof(COMMAND_DB) / sizeof(CommandRule))
@@ -66,9 +66,46 @@ char pathAccessable(char* token)
     else return 'F';
 }
 
+//return value meanings are the same as pathAccessables
+
+char dirCreatable(char* token)
+{
+    if(strcmp(pathAccessable(token),'F') != 0) return 'F';
+    //here it will be way more complicated since in the close future, we will handle correctness in a way that we will:
+    //loop from the top dir of the path to the bottom until we find a the start of the non existient directory - and if in the non existient create-ready part
+    //we will find a part that exists - the dir automatically becomes uncreatable
+
+}
+
+char fileCreatable(char* token)
+{
+    //similiarly to dirCreatable but only the last part of the dir is supposed to be nonexistent and should be a file
+}
+
+//cwd - current workin directory
+//the idea - we will loop from start to end on parts of the path, devided by the '/' thingy
+/*
+NOTES: we cannot go back from the root dir which is C:/ or D:/ (.. operation)
+
+first handle the most upper part of the dir:
+- if its starts like this C:/ or D:/ it starts as an absolute path
+- if it starts with regular letters, like lets say Documents/etc.. we have to treat it as ./Documents meaning we append the CWD at the start
+- if it starts with a ../ --> we have to go back one dir from the CWD and then keep going with it -> so ../Documents can be become C:/Users/Miron/Documents when the CWD was C:/Miron/Pictures
+- if it starts with a / -> we simply treat it like a ./ as in the second point
 
 
+in the middle
+if there is a ./ or a /./ at any point we just jump to the next token
+if there is a .. at any point, what we do is we cut the complete path back by the most upfront path - so C:/Users/Miron/Documents becomes C:/Users/Miron
+*/
+char* returnAbsolutePath(char* userInputPath, char* cwd)
+{
+    char completePath[256];
 
+}
+
+
+//NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
 char* checkInputErrors(char* inputBuffer)
 {
     if(!inputBuffer || inputBuffer[0] == '\0') return NULL;
@@ -92,14 +129,8 @@ char* checkInputErrors(char* inputBuffer)
                 break;
 
             case 1:
-                if (token[0] == '-')
-                {
-                    argsToken = token; 
-                }
-                else
-                {
-                    path1Token = token;
-                }
+                if (token[0] == '-') argsToken = token; 
+                else path1Token = token;
                 break;
 
             case 2:
@@ -179,16 +210,33 @@ char* checkInputErrors(char* inputBuffer)
             return errorBuffer;
         }
 
-
-        // else if(strcmp(COMMAND_DB[commandPos].path1Requirements[1],'D') == 0)//DIRECTORY PATH REQUIRED
-        // {
-
-        // }
-        // else//FILE PATH REQUIRED
-        // {
-
-        // }
-
+        //this is for existing paths, we will have another part where we will handle
+        char pathRequiredStatus = COMMAND_DB[commandPos].path1Requirements[2];
+        if(strcmp(pathRequiredStatus,'E') == 0)
+        {
+            switch (pathAccessable(path1Token))
+            {
+                case 'F'://path doesn't exists
+                    sprintf(errorBuffer,sizeof(errorBuffer),"The given path: '%s' doesn't exist on this device",path1Token);
+                    return errorBuffer;
+                case 'P'://path exists but innecasible(insufficient perms)
+                    sprintf(errorBuffer,sizeof(errorBuffer),"Insufficient permissions for the given path: ''");
+                case 'T'://path accessable!
+                    char pathType = determinePathType(path1Token);
+                    char pathTypeRequired = COMMAND_DB[commandPos].path1Requirements[1];
+                    if(strcmp(pathTypeRequired,pathType) != 0)
+                    {   
+                        sprintf(errorBuffer,sizeof(errorBuffer),"Wrong path type given(%s instead of %s)",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
+                        return errorBuffer;
+                    }
+                    return NULL;
+            }
+        }
+        //a making of a new path
+        else
+        {
+            
+        }
     }
 
 
@@ -202,6 +250,7 @@ char* checkInputErrors(char* inputBuffer)
 
 //this function takes an input that will look like this:
 //<command>  -<flags> <path> (each property can be null besides the command name block)
+//NOTE: WE WILL UPDATE IT SO THE CheckInputErrors function will already give us the tokens required for the parsing, so we won't do the parsing and the dir absolution 2 times and only 1 time, saving memmory and computing time
 ShellCommand* parse_input(char* inputBuffer)
 {
     if (!inputBuffer || inputBuffer[0] == '\0')
