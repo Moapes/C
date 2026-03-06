@@ -196,6 +196,86 @@ int minSwaps(int** grid, int gridSize, int* gridColSize) {
 
 
 
+char* reverse(char* curr)
+{
+    for(int i = 0; i < strlen(curr) / 2; i++)
+    {
+        char temp = curr[i];
+        curr[i] = curr[strlen(curr) - 1 - i];
+        curr[strlen(curr) - 1- i] = temp;
+    }
+    return curr;//return updated
+}
+
+char* invert(char* curr)
+{
+    for(int i = 0; i < strlen(curr); i++)
+    {
+        if(curr[i] == '1') curr[i] = '0';
+        else curr[i] = '1';
+    }
+    return curr;
+}
+
+char findKthBit(int n, int k) {
+    //calculate size required
+    int maxSize = 1;
+    int max2Size = 1;
+    for(int i = 1; i < n; i++)
+    {
+        maxSize = maxSize + 1 + maxSize;
+        if(i + 1 < n) max2Size = max2Size + 1 + max2Size;
+    }
+    char curr[maxSize+1];//+1 for the null terminator
+    curr[0] = '\0';
+    char prev[max2Size + 1];
+    prev[0] = '0';
+    prev[1] = '\0'; 
+    strcat(curr,prev);
+    for(int rep = 1; rep < n; rep++)
+    {
+        //add the reversed inverted char array
+        strcat(curr,"1");
+        strcat(curr,reverse(invert(prev)));
+        strcpy(prev,curr);
+        //check if there is a k index
+        if(strlen(curr) >= k) break;
+    }
+    return curr[k - 1];
+}   
+
+
+int numSpecial(int** mat, int matSize, int* matColSize) {
+    int rowCount[matSize];
+    int colCount[*matColSize];
+    
+    // 1. Initialize counts to 0
+    for(int i = 0; i < matSize; i++) rowCount[i] = 0;
+    for(int j = 0; j < *matColSize; j++) colCount[j] = 0;
+
+    // 2. Count how many 1s are in every row and every column
+    for(int i = 0; i < matSize; i++) {
+        for(int j = 0; j < *matColSize; j++) {
+            if(mat[i][j] == 1) {
+                rowCount[i]++;
+                colCount[j]++;
+            }
+        }
+    }
+
+    // 3. Only count 1s where their row and column sums are exactly 1
+    int specialCount = 0;
+    for(int i = 0; i < matSize; i++) {
+        for(int j = 0; j < *matColSize; j++) {
+            if(mat[i][j] == 1 && rowCount[i] == 1 && colCount[j] == 1) {
+                specialCount++;
+            }
+        }
+    }
+
+    return specialCount;
+}
+
 
 
 int main()
@@ -228,10 +308,50 @@ int main()
 
 
     //minswaps funk:
+    // int n = 3;
+    // int raw_data[3][3] = {
+    //     {0, 0, 1},
+    //     {1, 1, 0},
+    //     {1, 0, 0}
+    // };
+
+    // // Prepare the int** grid structure
+    // int** grid = (int**)malloc(n * sizeof(int*));
+    // int* gridColSize = (int*)malloc(n * sizeof(int));
+
+    // for (int i = 0; i < n; i++) {
+    //     grid[i] = (int*)malloc(n * sizeof(int));
+    //     gridColSize[i] = n;
+    //     for (int j = 0; j < n; j++) {
+    //         grid[i][j] = raw_data[i][j];
+    //     }
+    // }
+
+    // // Call the function
+    // int result = minSwaps(grid, n, gridColSize);
+
+    // // Output result
+    // if (result != -1) {
+    //     printf("Minimum swaps required: %d\n", result);
+    // } else {
+    //     printf("Impossible to arrange grid.\n");
+    // }
+
+    // // Clean up memory
+    // for (int i = 0; i < n; i++) free(grid[i]);
+    // free(grid);
+    // free(gridColSize);
+
+
+    //findkKthBit funk:
+    // printf("Kth byte equals to: %c",findKthBit(4,11));
+
+
+    //numSpecial:
     int n = 3;
     int raw_data[3][3] = {
+        {1, 0, 0},
         {0, 0, 1},
-        {1, 1, 0},
         {1, 0, 0}
     };
 
@@ -247,20 +367,18 @@ int main()
         }
     }
 
+    int* gridColSize2 = malloc(sizeof(int));
+    *gridColSize2 = 3;
     // Call the function
-    int result = minSwaps(grid, n, gridColSize);
+    int result = numSpecial(grid,3,gridColSize2);
 
     // Output result
-    if (result != -1) {
-        printf("Minimum swaps required: %d\n", result);
-    } else {
-        printf("Impossible to arrange grid.\n");
-    }
+    printf("Sum of specials: %d\n", result);
 
     // Clean up memory
     for (int i = 0; i < n; i++) free(grid[i]);
     free(grid);
     free(gridColSize);
-
+    free(gridColSize2);
     return 0;
 }
