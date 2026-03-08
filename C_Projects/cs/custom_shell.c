@@ -44,11 +44,11 @@ static const CommandRule COMMAND_DB[] = {
 
 int sumOfDirParts(char* dir)
 {
-    char* token = strtok(dir,'/');
+    char* token = strtok(dir,"/");
     int c = 0;
     while(token != NULL)
     {
-        token = strtok(NULL,'/');
+        token = strtok(NULL,"/");
         c++;    
     }
     return c;
@@ -78,12 +78,12 @@ char determinePathType(char* path)
 //NOTE: the next two function pathCreatable aswell as pathAccessable should only be used after the directory has been confirmed to exist
 
 //here we will have to check the directory itself and if there is an existing file with the same exact name
-char pathCreatable(char* dir)
+char pathCreatable(char *dir)
 {
     //similiarly to dirCreatable but only the last part of the dir is supposed to be nonexistent and should be a file
 
     //get the header of the dir(the file)
-    char* tempToken = strtok(dir,'/');//temp token for itiration
+    char* tempToken = strtok(dir,"/");//temp token for itiration
     char* restOfDir[strlen(dir)];
     char* headerToken;
     int cOfDirParts = sumOfDirParts(dir);
@@ -94,15 +94,15 @@ char pathCreatable(char* dir)
         if(c == cOfDirParts) strcpy(headerToken,tempToken);            
         else
         {
-            strcat(restOfDir,tempToken);
-            strcat(restOfDir,'/');
+            strcat(*restOfDir,tempToken);
+            strcat(*restOfDir,"/");
         }
 
 
-        tempToken = strtok(NULL,'/');
+        tempToken = strtok(NULL,"/");
     }
-    char pathAcsble = pathAccessable(restOfDir);
-    if(pathAccessable != 'T') return pathAcsble;//path isnt accessable therefore no file can be created
+    char pathAcsble = pathAccessable(*restOfDir);
+    if(pathAccessable(*restOfDir) != 'T') return pathAcsble;//path isnt accessable therefore no file can be created
 
     //now we will check if there is a file with an idential name in this dir to decide what we doin
     
@@ -270,6 +270,10 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
     }
 }
 
+// char validatePath()
+
+
+
 
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
 char* checkInputErrors(char* inputBuffer,char* cwd)
@@ -333,7 +337,7 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
     }
     if(!cmdExists)
     {
-        sprintf(errorBuffer,sizeof(errorBuffer),"The Command: '%s' is not recognised in the scope of this shell.",nameToken);
+        sprintf(errorBuffer,"The Command: '%s' is not recognised in the scope of this shell.",nameToken);
         return errorBuffer;
     }
 
@@ -344,10 +348,15 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
         for(int a = 0; a < strlen(argsToken); a++)
         {
             bool ArgFound = false;
-            for(int a2 = 0; a2 < strlen(COMMAND_DB[commandPos].allowedFlags); a2++) if(strcmp(COMMAND_DB[commandPos].allowedFlags[a2], argsToken[a])) ArgFound = ~ArgFound;
+            for(int a2 = 0; a2 < strlen(COMMAND_DB[commandPos].allowedFlags); a2++)
+            if(COMMAND_DB[commandPos].allowedFlags[a2] == argsToken[a])
+            {
+                ArgFound = true;
+                break;
+            } 
             if(!ArgFound)
             {
-                sprintf(errorBuffer,sizeof(errorBuffer),"The Argument/Flag '%c' is not recognised for the following Command : '%s'.",argsToken[a],COMMAND_DB[commandPos].name);
+                sprintf(errorBuffer,"The Argument/Flag '%c' is not recognised for the following Command : '%s'.",argsToken[a],COMMAND_DB[commandPos].name);
                 return errorBuffer;
             }
         }
@@ -360,41 +369,41 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
     {
         //generate full path if it even exists ofc
         char* fullPath1;
-        returnAbsolutePath(path1Token,cwd,fullPath1);
+        generateAbsolutePath(path1Token,cwd,fullPath1);
         //path1requirement check:
-        if(strcmp(COMMAND_DB[commandPos].path1Requirements[0],'F') == 0)//path isnt allowed
+        if(COMMAND_DB[commandPos].path1Requirements[0] == "F")//path isnt allowed
         {
             if(path1Token)
             {
-                sprintf(errorBuffer,sizeof(errorBuffer),"Unknown command argument: '%s'",path1Token);
+                sprintf(errorBuffer,"Unknown command argument: '%s'",path1Token);
                 return errorBuffer;
             }
         }
         else//path is optional/required
         {
-            if(strcmp(COMMAND_DB[commandPos].path1Requirements[0],'T') == 0 && !path1Token)//path required and not given
+            if(COMMAND_DB[commandPos].path1Requirements[0] == "T" && !path1Token)//path required and not given
             {
-                sprintf(errorBuffer,sizeof(errorBuffer),"(1) Argument missing (PATH)");
+                sprintf(errorBuffer,"(1) Argument missing (PATH)");
                 return errorBuffer;
             }
 
             //this is for existing paths, we will have another part where we will handle
             char pathRequiredStatus = COMMAND_DB[commandPos].path1Requirements[2];
-            if(strcmp(pathRequiredStatus,'E') == 0)
+            if(pathRequiredStatus == 'E')
             {
                 switch (pathAccessable(path1Token))
                 {
                     case 'F'://path doesn't exists
-                        sprintf(errorBuffer,sizeof(errorBuffer),"The given path: '%s' doesn't exist on this device",path1Token);
+                        sprintf(errorBuffer,"The given path: '%s' doesn't exist on this device",path1Token);
                         return errorBuffer;
                     case 'P'://path exists but innecasible(insufficient perms)
-                        sprintf(errorBuffer,sizeof(errorBuffer),"Insufficient permissions for the given path: ''");
+                        sprintf(errorBuffer,"Insufficient permissions for the given path: ''");
                     case 'T'://path accessable!
                         char pathType = determinePathType(path1Token);
                         char pathTypeRequired = COMMAND_DB[commandPos].path1Requirements[1];
-                        if(strcmp(pathTypeRequired,pathType) != 0)
+                        if(pathTypeRequired != pathType)
                         {   
-                            sprintf(errorBuffer,sizeof(errorBuffer),"Wrong path type given(%s instead of %s)",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
+                            sprintf(errorBuffer,"Wrong path type given(%s instead of %s)",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
                             return errorBuffer;
                         }
                         return NULL;
@@ -406,10 +415,10 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
                 switch(pathCreatable(fullPath1))
                 {
                     case 'F':
-                        sprintf(errorBuffer,sizeof(errorBuffer),"failed to create the new %s, incorrect Directory\n",path1Requirements == 'D' ? "Directroy" : "File");
+                        sprintf(errorBuffer,"failed to create the new %s, incorrect Directory\n",path1Requirements == 'D' ? "Directroy" : "File");
                         return errorBuffer;
                     case 'P':
-                        sprintf(errorBuffer,sizeof(errorBuffer),"insufficient permissions to access the directory");
+                        sprintf(errorBuffer,"insufficient permissions to access the directory");
                         return errorBuffer;
                     case 'T':
                         //success
@@ -534,6 +543,29 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
 int main()
 {
+    char originText[] = "ls -alo ../";
+    char* inputBuffer = (char*)miron_malloc(sizeof(originText) + 1);
+    strcpy(inputBuffer,originText);
+    char* cwd = "C:/Users/Miron";
+
+    printf("%s",checkInputErrors(inputBuffer,cwd));
+
+    // while(1)
+    // {
+    //     printf("\n%s>",cwd);
+
+    //     if (fgets(inputBuffer, sizeof(inputBuffer), stdin) == NULL) break;
+
+    //     // 3. Remove the annoying newline '\n' at the end
+    //     inputBuffer[strcspn(inputBuffer, "\n")] = 0;
+    
+    //     if (strcmp(inputBuffer, "exit") == 0) {
+    //         break;
+    //     }
+    //     printf("%s",checkInputErrors(inputBuffer,cwd));
+    // }
+
+
     // // 1. Define the raw text
     // char* sourceText = "ls -alo C:/MironComputer/Documents";
     
@@ -562,34 +594,34 @@ int main()
 
 
 
-    // Simulated Current Working Directory
-    char cwd[] = "C:/Users/Miron/Projects";
+    // // Simulated Current Working Directory
+    // char cwd[] = "C:/Users/Miron/Projects";
     
-    // Test 1: Complex Relative Path
-    char input1[] = "../Documents/./Secret/../Notes";
-    // Expected: "C:/Users/Miron/Notes"
+    // // Test 1: Complex Relative Path
+    // char input1[] = "../Documents/./Secret/../Notes";
+    // // Expected: "C:/Users/Miron/Notes"
 
-    // Test 2: Implicit Relative Path (no dots)
-    char input2[] = "Downloads/Pictures";
-    // Expected: "C:/Users/Miron/Projects/Downloads/Pictures"
+    // // Test 2: Implicit Relative Path (no dots)
+    // char input2[] = "Downloads/Pictures";
+    // // Expected: "C:/Users/Miron/Projects/Downloads/Pictures"
 
-    // Test 3: Absolute Path (should ignore CWD)
-    char input3[] = "D:/Games/Minecraft";
-    // Expected: "D:/Games/Minecraft"
+    // // Test 3: Absolute Path (should ignore CWD)
+    // char input3[] = "D:/Games/Minecraft";
+    // // Expected: "D:/Games/Minecraft"
 
-    // Test 4: Root Guard (trying to go above C:/)
-    char input4[] = "../../../../../..";
-    // Expected: "C:/" (or NULL depending on your choice)
+    // // Test 4: Root Guard (trying to go above C:/)
+    // char input4[] = "../../../../../..";
+    // // Expected: "C:/" (or NULL depending on your choice)
 
-    // Example call (assuming you handle the return string allocation)
-    printf("CWD: %s\n", cwd);
-    printf("Input: %s\n", input2);
+    // // Example call (assuming you handle the return string allocation)
+    // printf("CWD: %s\n", cwd);
+    // printf("Input: %s\n", input2);
     
-    char* result = miron_malloc(256);
-    returnAbsolutePath(input2, cwd,result);
+    // char* result = miron_malloc(256);
+    // returnAbsolutePath(input2, cwd,result);
     
     
-    printf("Resolved: %s\n", result);
+    // printf("Resolved: %s\n", result);
 
     return 0;
 }

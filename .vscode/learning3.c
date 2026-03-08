@@ -278,8 +278,41 @@ int numSpecial(int** mat, int matSize, int* matColSize) {
 
 
 
+bool checkOnesSegment(char* s) {
+    int cOfSeg = 0;
+    int segLen = 0;
+    bool seg = false;
+    for(int i = 0; i < strlen(s); i++)
+    {
+        if(cOfSeg > 1) return false;
+        if(s[i] == '1')
+        {
+            segLen++;
+            if(!seg && segLen > 1)
+            {
+                seg = ~seg;
+                cOfSeg++;
+            }
+        }
+        else if(s[i] == '0')
+        {
+            seg = false;
+            segLen = 0;
+        }
+    }
+    if(cOfSeg != 1) return false;
+    return true;
+}
+
+
+
 int main()
 {
+    //checkOnesSegment funk:
+    char* s = "1001";//3 + null terminator
+    printf("               %d                 ",checkOnesSegment(s));
+
+
     //checkDistances funk:
     // int* distance = calloc(26,sizeof(int)); 
     // distance[0] = 51;
@@ -348,37 +381,37 @@ int main()
 
 
     //numSpecial:
-    int n = 3;
-    int raw_data[3][3] = {
-        {1, 0, 0},
-        {0, 0, 1},
-        {1, 0, 0}
-    };
+    // int n = 3;
+    // int raw_data[3][3] = {
+    //     {1, 0, 0},
+    //     {0, 0, 1},
+    //     {1, 0, 0}
+    // };
 
-    // Prepare the int** grid structure
-    int** grid = (int**)malloc(n * sizeof(int*));
-    int* gridColSize = (int*)malloc(n * sizeof(int));
+    // // Prepare the int** grid structure
+    // int** grid = (int**)malloc(n * sizeof(int*));
+    // int* gridColSize = (int*)malloc(n * sizeof(int));
 
-    for (int i = 0; i < n; i++) {
-        grid[i] = (int*)malloc(n * sizeof(int));
-        gridColSize[i] = n;
-        for (int j = 0; j < n; j++) {
-            grid[i][j] = raw_data[i][j];
-        }
-    }
+    // for (int i = 0; i < n; i++) {
+    //     grid[i] = (int*)malloc(n * sizeof(int));
+    //     gridColSize[i] = n;
+    //     for (int j = 0; j < n; j++) {
+    //         grid[i][j] = raw_data[i][j];
+    //     }
+    // }
 
-    int* gridColSize2 = malloc(sizeof(int));
-    *gridColSize2 = 3;
-    // Call the function
-    int result = numSpecial(grid,3,gridColSize2);
+    // int* gridColSize2 = malloc(sizeof(int));
+    // *gridColSize2 = 3;
+    // // Call the function
+    // int result = numSpecial(grid,3,gridColSize2);
 
-    // Output result
-    printf("Sum of specials: %d\n", result);
+    // // Output result
+    // printf("Sum of specials: %d\n", result);
 
-    // Clean up memory
-    for (int i = 0; i < n; i++) free(grid[i]);
-    free(grid);
-    free(gridColSize);
-    free(gridColSize2);
+    // // Clean up memory
+    // for (int i = 0; i < n; i++) free(grid[i]);
+    // free(grid);
+    // free(gridColSize);
+    // free(gridColSize2);
     return 0;
 }
