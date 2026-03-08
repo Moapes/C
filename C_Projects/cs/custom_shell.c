@@ -321,11 +321,11 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
     //2.we will check if it requires a file path
     bool cmdExists = false;
     int commandPos;
-    char* path1Requirements;
-    char* path2Requirements;
+    const char* path1Requirements;
+    const char* path2Requirements;
     for(int c = 0; c < DB_SIZE; c++)
     {
-        if(strcmp(COMMAND_DB[c].name, nameToken))
+        if(strcmp(COMMAND_DB[c].name, nameToken) == 0)
         {
             cmdExists = true;
             //save pathRequirement
@@ -335,7 +335,7 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
             break;
         } 
     }
-    if(!cmdExists)
+    if(!cmdExists)//if the command name input is incorrect we stop
     {
         sprintf(errorBuffer,"The Command: '%s' is not recognised in the scope of this shell.",nameToken);
         return errorBuffer;
@@ -345,6 +345,8 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
     //now time to check command args(only invalid if there is an invalid arg)
     if(argsToken)
     {
+        //we strip the '-' part / we make the pointer to the string point to the index 1 [essentially cutting out the first '-' part]
+        argsToken = argsToken + 1;
         for(int a = 0; a < strlen(argsToken); a++)
         {
             bool ArgFound = false;
@@ -368,10 +370,10 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
     if(path1Token != NULL) 
     {
         //generate full path if it even exists ofc
-        char* fullPath1;
+        char* fullPath1 = (char*)miron_malloc(256);
         generateAbsolutePath(path1Token,cwd,fullPath1);
         //path1requirement check:
-        if(COMMAND_DB[commandPos].path1Requirements[0] == "F")//path isnt allowed
+        if(COMMAND_DB[commandPos].path1Requirements[0] == 'F')//path isnt allowed
         {
             if(path1Token)
             {
@@ -381,7 +383,7 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
         }
         else//path is optional/required
         {
-            if(COMMAND_DB[commandPos].path1Requirements[0] == "T" && !path1Token)//path required and not given
+            if(COMMAND_DB[commandPos].path1Requirements[0] == 'T' && !path1Token)//path required and not given
             {
                 sprintf(errorBuffer,"(1) Argument missing (PATH)");
                 return errorBuffer;
@@ -415,7 +417,7 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
                 switch(pathCreatable(fullPath1))
                 {
                     case 'F':
-                        sprintf(errorBuffer,"failed to create the new %s, incorrect Directory\n",path1Requirements == 'D' ? "Directroy" : "File");
+                        sprintf(errorBuffer,"failed to create the new %s, incorrect Directory\n",path1Requirements[1] == 'D' ? "Directroy" : "File");
                         return errorBuffer;
                     case 'P':
                         sprintf(errorBuffer,"insufficient permissions to access the directory");
@@ -442,8 +444,7 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
 //NOTE: WE WILL UPDATE IT SO THE CheckInputErrors function will already give us the tokens required for the parsing, so we won't do the parsing and the dir absolution 2 times and only 1 time, saving memmory and computing time
 ShellCommand* parse_input(char* inputBuffer,char* cwd)
 {
-    if (!inputBuffer || inputBuffer[0] == '\0')
-        return NULL;
+    if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
 
     char* nameToken = NULL; 
     char* argsToken = NULL;
@@ -546,7 +547,7 @@ int main()
     char originText[] = "ls -alo ../";
     char* inputBuffer = (char*)miron_malloc(sizeof(originText) + 1);
     strcpy(inputBuffer,originText);
-    char* cwd = "C:/Users/Miron";
+    char cwd[] = "C:/Users/Miron";
 
     printf("%s",checkInputErrors(inputBuffer,cwd));
 
