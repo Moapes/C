@@ -1,4 +1,5 @@
 #include <memoryapi.h>
+#include <stdint.h> //for bitwise operations
 #include <stdio.h> //basic standard lib
 #include <stdlib.h> //module/header for basic dynamic memory allocation
 #include <stdbool.h> //for boolean operation
@@ -32,14 +33,70 @@ typedef struct CommandRule{
 } CommandRule;
 
 static const CommandRule COMMAND_DB[] = {
-    {"ls", "alo","ODE","FFE"},
+    {"ls", "aAlhRrtS","ODE","FFE"},
     {"cd", "","TDE","FFE"},
     {"mkdir", "p","TDN","FFN"},
     {"exit", "","FFE","FFE"}
 };
 
 #define DB_SIZE (sizeof(COMMAND_DB) / sizeof(CommandRule))
+#define MAX_INPUT_SIZE 200
 
+// --- Lowercase Flags (Bits 0-25) ---
+#define FLAG_a (1ULL << 0)
+#define FLAG_b (1ULL << 1)
+#define FLAG_c (1ULL << 2)
+#define FLAG_d (1ULL << 3)
+#define FLAG_e (1ULL << 4)
+#define FLAG_f (1ULL << 5)
+#define FLAG_g (1ULL << 6)
+#define FLAG_h (1ULL << 7)
+#define FLAG_i (1ULL << 8)
+#define FLAG_j (1ULL << 9)
+#define FLAG_k (1ULL << 10)
+#define FLAG_l (1ULL << 11)
+#define FLAG_m (1ULL << 12)
+#define FLAG_n (1ULL << 13)
+#define FLAG_o (1ULL << 14)
+#define FLAG_p (1ULL << 15)
+#define FLAG_q (1ULL << 16)
+#define FLAG_r (1ULL << 17)
+#define FLAG_s (1ULL << 18)
+#define FLAG_t (1ULL << 19)
+#define FLAG_u (1ULL << 20)
+#define FLAG_v (1ULL << 21)
+#define FLAG_w (1ULL << 22)
+#define FLAG_x (1ULL << 23)
+#define FLAG_y (1ULL << 24)
+#define FLAG_z (1ULL << 25)
+
+// --- Uppercase Flags (Bits 26-51) ---
+#define FLAG_A (1ULL << 26)
+#define FLAG_B (1ULL << 27)
+#define FLAG_C (1ULL << 28)
+#define FLAG_D (1ULL << 29)
+#define FLAG_E (1ULL << 30)
+#define FLAG_F (1ULL << 31)
+#define FLAG_G (1ULL << 32)
+#define FLAG_H (1ULL << 33)
+#define FLAG_I (1ULL << 34)
+#define FLAG_J (1ULL << 35)
+#define FLAG_K (1ULL << 36)
+#define FLAG_L (1ULL << 37)
+#define FLAG_M (1ULL << 38)
+#define FLAG_N (1ULL << 39)
+#define FLAG_O (1ULL << 40)
+#define FLAG_P (1ULL << 41)
+#define FLAG_Q (1ULL << 42)
+#define FLAG_R (1ULL << 43)
+#define FLAG_S (1ULL << 44)
+#define FLAG_T (1ULL << 45)
+#define FLAG_U (1ULL << 46)
+#define FLAG_V (1ULL << 47)
+#define FLAG_W (1ULL << 48)
+#define FLAG_X (1ULL << 49)
+#define FLAG_Y (1ULL << 50)
+#define FLAG_Z (1ULL << 51)
 
 
 int sumOfDirParts(char* dir)
@@ -164,10 +221,10 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 {
     char userInputPath[256];
     strncpy(userInputPath, inputPath, sizeof(userInputPath) - 1);
-    char* completePath[256];
+    char* completePath[256] = {0};
     char* token = strtok(userInputPath,"/");
-    char* arrOfTokenPointers[128];
-    char* arrOfCWDPointers[128];
+    char* arrOfTokenPointers[128] = {0};
+    char* arrOfCWDPointers[128] = {0};
     //built an array of token pointers so we can scan it from top to bottom
     int i = 0;
     while(token != NULL)
@@ -540,16 +597,63 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 }
 
 
+//planning\order:
+/*
+
+
+
+
+*/
+
+bool ls(ShellCommand* currCommand,char* cwd)
+{
+    //flags that tells how to print out the file info
+    bool l = strchr(currCommand->args,'l') != NULL;//uses a long listing format, show perms, num of links, owner, group, size in bytes, and the last time of modification
+    bool h = strchr(currCommand->args,'h') != NULL;//human readable --> displayes file sizes in human-readable formats like K/M/G
+
+    //flags that relate to what files to show and what not to:
+    bool a = strchr(currCommand->args,'a') != NULL;//Lists all files including hidden and .. / .
+    bool A = strchr(currCommand->args,'A') != NULL;//lists everything except .. / .
+
+    //flag that tells how to search through the files (Recursive or not)
+    bool R = strchr(currCommand->args,'R') != NULL;//recursively list contents of all subdirs
+
+    //flags that tell how to sort the order of files showing
+    bool t = strchr(currCommand->args,'t') != NULL;//sort the list by modification time(recent first)
+    bool r = strchr(currCommand->args,'r') != NULL;//reverse the sorting order
+    bool S = strchr(currCommand->args,'S') != NULL;//sort list by size
+
+
+}
+
+
+
+
+
+
 
 
 int main()
 {
-    char originText[] = "ls -alo ../";
-    char* inputBuffer = (char*)miron_malloc(sizeof(originText) + 1);
-    strcpy(inputBuffer,originText);
-    char cwd[] = "C:/Users/Miron";
+    char cwd[] = "C:/Users/Miron";//first default cwd, in the future will be modifiable
+    while(1)//loop forever and ask for command input from the user until he exits(exit command)
+    {
+        char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
+        fgets(inputBuffer,MAX_INPUT_SIZE, stdin);
 
-    printf("%s",checkInputErrors(inputBuffer,cwd));
+        ShellCommand* currCommand = parse_input(inputBuffer,cwd);
+        if(strcmp(currCommand->commandName,"exit") == 0)//if the user typed exit --> we close the shell down 
+        {
+            printf("Closing current shell...\n");
+            break;
+        }
+
+
+
+        memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
+        freeMemBlock(currCommand);
+    }
+
 
     // while(1)
     // {
