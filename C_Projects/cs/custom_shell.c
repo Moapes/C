@@ -21,7 +21,7 @@
 
 typedef struct ShellCommand{
     char* commandName;
-    char* args;
+    uint64_t* args;
     char* path1;
     char* path2;
 }ShellCommand;
@@ -450,7 +450,7 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
 //example:
 //input : ABD
 //output: ...000001011
-uint64_t loadsArgsToken(char* token)
+uint64_t loadArgsToken(char* token)
 {
     uint64_t argsToken = 0;//make it ...00000000 first
     for(int i = 0; i < sizeof(token); i++)
@@ -467,9 +467,15 @@ uint64_t loadsArgsToken(char* token)
 ShellCommand* parse_input(char* inputBuffer,char* cwd)
 {
     if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
+    char* output = checkInputErrors(inputBuffer,cwd);
+    if(output)
+    {
+        printf("%s",output);
+        return NULL;
+    }
 
     char* nameToken = NULL; 
-    uint64_t argsToken = NULL;
+    uint64_t argsToken = 0;
     char* path1Token = NULL;
     char* path2Token = NULL;
     size_t nameLen = 0;
@@ -479,6 +485,9 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
     char* token = strtok(inputBuffer, " ");
     int countOfSection = 0;
+
+
+
 
     while (token != NULL)
     {
@@ -498,8 +507,9 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
                 }
                 else
                 {
-                    path1Token = token;
+                    generateAbsolutePath(token,cwd,path1Token);
                     path1Len = strlen(path1Token) + 1;
+                    countOfSection++;
                 }
                 break;
 
@@ -515,6 +525,18 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
         countOfSection++;
         token = strtok(NULL, " ");
+    }
+    //if path1 is optional and was not inputted - we have to put the cwd instead
+    if(countOfSection <= 3 && path1Len == 0)
+    {
+        path1Token = cwd;
+        path1Len = strlen(cwd) + 1;
+    }
+    //same goes with path2
+    else if(countOfSection == 4 && path2Len == 0)
+    {
+        path2Token = cwd;
+        path2Len = strlen(cwd) + 1;
     }
 
     //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
@@ -534,8 +556,9 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
     if(argsLen)
     {
-        parsedCommand->args = dataStart;
-        memcpy(dataStart, argsToken, argsLen);
+        uint64_t* tempDataStart = (uint64_t*)dataStart;
+        parsedCommand->args = tempDataStart;
+        *dataStart = argsToken;
         dataStart += argsLen;
     }
     else parsedCommand->args = NULL;
@@ -563,7 +586,7 @@ bool lsRecursive(ShellCommand* currCommand,char* cwd)//WIP
     return true;
 }
 
-bool lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
+void lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
 {
     char search_path[256];
     //add a /* filter to basically tell the findData of windows.h to take everything that is inside that directory
@@ -574,20 +597,24 @@ bool lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
     HANDLE hFind = FindFirstFile(search_path,&findData);
 
     //itirate through the dir until we find the border
-    while(FindNextFile(hFind, &findData != 0)) 
+    while(FindNextFile(hFind, &findData ) != 0 ) 
     {
         if(findData.cFileName[0] == '.') continue; //skip .. and . dirs
-
+        printf("%s \n",findData.cFileName);
         
     }
 }
 
 bool ls(ShellCommand* currCommand,char* cwd)
 {
-    uint64_t args = currCommand->args;
-    bool noArgs = args == NULL;//we wont check args at all if there are none for the duration of the commands doings
-    if(lsNoArgs(currCommand,cwd));
-    bool isRecursive = ARG_EXISTS(args,'R');//check if the bit on the offset for recursiveness is on
+    uint64_t* args = (uint64_t*)(currCommand->args);
+    bool noArgs = !args;//we wont check args at all if there are none for the duration of the commands doings
+    if(noArgs)
+    {
+        lsNoArgs(currCommand,cwd);
+        return true;
+    }
+    bool isRecursive = ARG_EXISTS(*args,'R');//check if the bit on the offset for recursiveness is on
 
     //flags that tells how to print out the file info
     // bool l = strchr(currCommand->args,'l') != NULL;//uses a long listing format, show perms, num of links, owner, group, size in bytes, and the last time of modification
@@ -620,18 +647,23 @@ bool ls(ShellCommand* currCommand,char* cwd)
 
 int main()
 {
-    char cwd[] = "C:/Users/Miron";//first default cwd, in the future will be modifiable
+    char cwd[] = "D:/Games";//first default cwd, in the future will be modifiable
+    char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
     {
+        printf("%s> ",cwd);
         fgets(inputBuffer,MAX_INPUT_SIZE, stdin);
+        inputBuffer[strcspn(inputBuffer, "\n")] = '\0';
+        if(strlen(inputBuffer) == 0) continue;//additional shield to protect the allocator
 
         ShellCommand* currCommand = parse_input(inputBuffer,cwd);
+        if(currCommand == NULL) continue;
         if(strcmp(currCommand->commandName,"exit") == 0)//if the user typed exit --> we close the shell down 
         {
             printf("Closing current shell...\n");
             break;
         }
-
+        if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
 
 
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
