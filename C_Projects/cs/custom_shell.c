@@ -12,6 +12,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <windows.h>//for searching in the file system(windows official lib btw)
+
 //for existing directory analysis of contents
 #include <windows.h>
 
@@ -42,61 +44,10 @@ static const CommandRule COMMAND_DB[] = {
 #define DB_SIZE (sizeof(COMMAND_DB) / sizeof(CommandRule))
 #define MAX_INPUT_SIZE 200
 
-// --- Lowercase Flags (Bits 0-25) ---
-#define FLAG_a (1ULL << 0)
-#define FLAG_b (1ULL << 1)
-#define FLAG_c (1ULL << 2)
-#define FLAG_d (1ULL << 3)
-#define FLAG_e (1ULL << 4)
-#define FLAG_f (1ULL << 5)
-#define FLAG_g (1ULL << 6)
-#define FLAG_h (1ULL << 7)
-#define FLAG_i (1ULL << 8)
-#define FLAG_j (1ULL << 9)
-#define FLAG_k (1ULL << 10)
-#define FLAG_l (1ULL << 11)
-#define FLAG_m (1ULL << 12)
-#define FLAG_n (1ULL << 13)
-#define FLAG_o (1ULL << 14)
-#define FLAG_p (1ULL << 15)
-#define FLAG_q (1ULL << 16)
-#define FLAG_r (1ULL << 17)
-#define FLAG_s (1ULL << 18)
-#define FLAG_t (1ULL << 19)
-#define FLAG_u (1ULL << 20)
-#define FLAG_v (1ULL << 21)
-#define FLAG_w (1ULL << 22)
-#define FLAG_x (1ULL << 23)
-#define FLAG_y (1ULL << 24)
-#define FLAG_z (1ULL << 25)
+#define NUMBER_OF_FLAGS 52
 
-// --- Uppercase Flags (Bits 26-51) ---
-#define FLAG_A (1ULL << 26)
-#define FLAG_B (1ULL << 27)
-#define FLAG_C (1ULL << 28)
-#define FLAG_D (1ULL << 29)
-#define FLAG_E (1ULL << 30)
-#define FLAG_F (1ULL << 31)
-#define FLAG_G (1ULL << 32)
-#define FLAG_H (1ULL << 33)
-#define FLAG_I (1ULL << 34)
-#define FLAG_J (1ULL << 35)
-#define FLAG_K (1ULL << 36)
-#define FLAG_L (1ULL << 37)
-#define FLAG_M (1ULL << 38)
-#define FLAG_N (1ULL << 39)
-#define FLAG_O (1ULL << 40)
-#define FLAG_P (1ULL << 41)
-#define FLAG_Q (1ULL << 42)
-#define FLAG_R (1ULL << 43)
-#define FLAG_S (1ULL << 44)
-#define FLAG_T (1ULL << 45)
-#define FLAG_U (1ULL << 46)
-#define FLAG_V (1ULL << 47)
-#define FLAG_W (1ULL << 48)
-#define FLAG_X (1ULL << 49)
-#define FLAG_Y (1ULL << 50)
-#define FLAG_Z (1ULL << 51)
+//offset calculation macro
+#define ARG_EXISTS(offsetString,c) (offsetString | 1U << c - 'A')
 
 
 int sumOfDirParts(char* dir)
@@ -493,8 +444,22 @@ char* checkInputErrors(char* inputBuffer,char* cwd)
 
 }
 
+//the function will take modify the token of args and make it so it turns to a string of offsetted bits corresponding to their position in the A-z spot
+//for example the flag B will be at offset 1 
 
-
+//example:
+//input : ABD
+//output: ...000001011
+uint64_t loadsArgsToken(char* token)
+{
+    uint64_t argsToken = 0;//make it ...00000000 first
+    for(int i = 0; i < sizeof(token); i++)
+    {
+        int offset = token[i] - 'A';//calc offset by the distance from the first letter of the two alphabets(uppercase --> lowercase)
+        argsToken |= 1 << offset;
+    }
+    return argsToken;
+}
 
 //this function takes an input that will look like this:
 //<command>  -<flags> <path> (each property can be null besides the command name block)
@@ -504,7 +469,7 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
 
     char* nameToken = NULL; 
-    char* argsToken = NULL;
+    uint64_t argsToken = NULL;
     char* path1Token = NULL;
     char* path2Token = NULL;
     size_t nameLen = 0;
@@ -520,6 +485,7 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
         switch (countOfSection)
         {
             case 0:
+
                 nameToken = token;
                 nameLen = strlen(nameToken) + 1;
                 break;
@@ -527,8 +493,8 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
             case 1:
                 if (token[0] == '-')
                 {
-                    argsToken = token; 
-                    argsLen = strlen(argsToken) + 1;
+                    argsToken = loadArgsToken(token);
+                    argsLen = sizeof(uint64_t);
                 }
                 else
                 {
@@ -551,80 +517,99 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
         token = strtok(NULL, " ");
     }
 
-
+    //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
     size_t totalSize = nameLen + argsLen + path1Len + path2Len;
 
-    ShellCommand* parsedCommand =
-        miron_malloc(sizeof(ShellCommand) + totalSize);
+    ShellCommand* parsedCommand = miron_malloc(sizeof(ShellCommand) + totalSize);
 
     char* dataStart = (char*)(parsedCommand + 1);
 
-    if (nameLen)
+    if(nameLen)
     {
         parsedCommand->commandName = dataStart;
         memcpy(dataStart, nameToken, nameLen);
         dataStart += nameLen;
     }
-    else
-        parsedCommand->commandName = NULL;
+    else parsedCommand->commandName = NULL;
 
-    if (argsLen)
+    if(argsLen)
     {
         parsedCommand->args = dataStart;
         memcpy(dataStart, argsToken, argsLen);
         dataStart += argsLen;
     }
-    else
-        parsedCommand->args = NULL;
+    else parsedCommand->args = NULL;
 
-    if (path1Len)
+    if(path1Len)
     {
         parsedCommand->path1 = dataStart;
         memcpy(dataStart, path1Token, path1Len);
     }
-    else
-        parsedCommand->path1 = NULL;
+    else parsedCommand->path1 = NULL;
 
-    if (path2Len)
+    if(path2Len)
     {
         parsedCommand->path2 = dataStart;
         memcpy(dataStart, path2Token, path2Len);
     }
-    else
-        parsedCommand->path2 = NULL;
+    else parsedCommand->path2 = NULL;
 
     return parsedCommand;
 }
 
 
-//planning\order:
-/*
+bool lsRecursive(ShellCommand* currCommand,char* cwd)//WIP
+{
+    return true;
+}
 
+bool lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
+{
+    char search_path[256];
+    //add a /* filter to basically tell the findData of windows.h to take everything that is inside that directory
+    snprintf(search_path, 256, "%s/*",currCommand->path1); 
 
+    WIN32_FIND_DATA findData;
 
+    HANDLE hFind = FindFirstFile(search_path,&findData);
 
-*/
+    //itirate through the dir until we find the border
+    while(FindNextFile(hFind, &findData != 0)) 
+    {
+        if(findData.cFileName[0] == '.') continue; //skip .. and . dirs
+
+        
+    }
+}
 
 bool ls(ShellCommand* currCommand,char* cwd)
 {
+    uint64_t args = currCommand->args;
+    bool noArgs = args == NULL;//we wont check args at all if there are none for the duration of the commands doings
+    if(lsNoArgs(currCommand,cwd));
+    bool isRecursive = ARG_EXISTS(args,'R');//check if the bit on the offset for recursiveness is on
+
     //flags that tells how to print out the file info
-    bool l = strchr(currCommand->args,'l') != NULL;//uses a long listing format, show perms, num of links, owner, group, size in bytes, and the last time of modification
-    bool h = strchr(currCommand->args,'h') != NULL;//human readable --> displayes file sizes in human-readable formats like K/M/G
+    // bool l = strchr(currCommand->args,'l') != NULL;//uses a long listing format, show perms, num of links, owner, group, size in bytes, and the last time of modification
+    // bool h = strchr(currCommand->args,'h') != NULL;//human readable --> displayes file sizes in human-readable formats like K/M/G
 
     //flags that relate to what files to show and what not to:
-    bool a = strchr(currCommand->args,'a') != NULL;//Lists all files including hidden and .. / .
-    bool A = strchr(currCommand->args,'A') != NULL;//lists everything except .. / .
+    // bool a = strchr(currCommand->args,'a') != NULL;//Lists all files including hidden and .. / .
+    // bool A = strchr(currCommand->args,'A') != NULL;//lists everything except .. / .
 
     //flag that tells how to search through the files (Recursive or not)
-    bool R = strchr(currCommand->args,'R') != NULL;//recursively list contents of all subdirs
+    // bool R = strchr(currCommand->args,'R') != NULL;//recursively list contents of all subdirs
 
     //flags that tell how to sort the order of files showing
-    bool t = strchr(currCommand->args,'t') != NULL;//sort the list by modification time(recent first)
-    bool r = strchr(currCommand->args,'r') != NULL;//reverse the sorting order
-    bool S = strchr(currCommand->args,'S') != NULL;//sort list by size
-
+    // bool t = strchr(currCommand->args,'t') != NULL;//sort the list by modification time(recent first)
+    // bool r = strchr(currCommand->args,'r') != NULL;//reverse the sorting order
+    // bool S = strchr(currCommand->args,'S') != NULL;//sort list by size
 
 }
+
+
+
+
 
 
 

@@ -304,13 +304,50 @@ bool checkOnesSegment(char* s) {
     return true;
 }
 
+int singleNumber(int* nums, int numsSize)
+{
+    int startingI = 0;
+    int result = 0;
+    for(int i = 0; i < numsSize - 1; i++)
+    {
+        result = 0;
+        for(int j = i; j < numsSize; j++)
+        {
+            result ^= nums[j];
+        }
+        if(result^nums[i] == 0) return nums[i];
+    }
+    return nums[numsSize - 1];
+}
 
+
+int reverseBits(int n) 
+{
+    int result = 0;
+    for(int i = 1; i < 32; i++)
+    {       
+        result |= n & 1;
+        result <<= 1;
+        n >>= 1;
+    }
+
+    return result;
+}
 
 int main()
 {
+    //reverseBits funk:
+    printf("%d",reverseBits(4));
+
+
+    //singleNumber funk:
+    // int arr[3] = {2,2,1};
+    // printf("%d",singleNumber(arr,sizeof(arr) / sizeof(int)));
+
+
     //checkOnesSegment funk:
-    char* s = "1001";//3 + null terminator
-    printf("               %d                 ",checkOnesSegment(s));
+    // char* s = "1001";//3 + null terminator
+    // printf("               %d                 ",checkOnesSegment(s));
 
 
     //checkDistances funk:
