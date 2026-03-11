@@ -623,7 +623,6 @@ int main()
     char cwd[] = "C:/Users/Miron";//first default cwd, in the future will be modifiable
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
     {
-        char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
         fgets(inputBuffer,MAX_INPUT_SIZE, stdin);
 
         ShellCommand* currCommand = parse_input(inputBuffer,cwd);
