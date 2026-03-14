@@ -46,9 +46,17 @@ static const CommandRule COMMAND_DB[] = {
 
 #define NUMBER_OF_FLAGS 52
 
-//offset calculation macro
-#define ARG_EXISTS(offsetString,c) (offsetString | 1U << c - 'A')
+#define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 7
 
+
+
+
+bool arg_exists(uint64_t offsetString,char c)
+{
+    bool isLowerCase = c >= 'a' && c <= 'z';
+    if(isLowerCase) isLowerCase - DISTANCE_BETWEEN_ASCII_LOWER_UPPER;
+    return offsetString | 1U << c - 'A';
+}
 
 int sumOfDirParts(char* dir)
 {
@@ -224,27 +232,23 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
         includeWholeCWD = true;//regular word, treat it as a regular ./ situation
     }
     //debug for first dir appearance handling, flags checkup first
-    printf("includeMostCWD: %d --- includeWholeCWD: %d --- includeRoot: %d \n",includeMostCWD,includeWholeCWD,includeWholeCWD);
     int iOfCompletePath = 0;
-    printf("First dir part is: %s \n",arrOfTokenPointers[0]);
     if(includeMostCWD || includeWholeCWD) 
     {//j - is the len of the CWD by tokens
         for(int d = 0; d < j ; d++)
         {
-            printf("Copying... : %s \n",arrOfCWDPointers[d]);
             if(d == j - 1 && !includeWholeCWD) break;
             completePath[d] = arrOfCWDPointers[d];
             iOfCompletePath++;
         }
     }
-    printf("starting to add the userPath at index: %d\n",iOfCompletePath);
+
     //now the result is that we have a starting dir to work with
     int dir;
     if(isAbsolute || includeWholeCWD) dir = 0;
     else dir = 1;
     for(dir; dir < i; dir++)
     {
-        printf("curr Dir num: %d \n",dir);
         // printf("Scanning inputPath...  %s \n",arrOfTokenPointers[dir]);
         if(strcmp(arrOfTokenPointers[dir], ".") == 0)
         {
@@ -284,8 +288,11 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 
 
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
-char* checkInputErrors(char* inputBuffer,char* cwd)
+char* checkInputErrors(char* targetInputBuffer,char* cwd)
 {
+    char inputBuffer[1024];
+    strcpy(inputBuffer, targetInputBuffer);
+
     if(!inputBuffer || inputBuffer[0] == '\0') return NULL;
 
     char* nameToken = NULL; 
@@ -455,7 +462,10 @@ uint64_t loadArgsToken(char* token)
     uint64_t argsToken = 0;//make it ...00000000 first
     for(int i = 0; i < sizeof(token); i++)
     {
+        bool isLowerCase = token[i] >= 'a' && token[i] <= 'z';
+        
         int offset = token[i] - 'A';//calc offset by the distance from the first letter of the two alphabets(uppercase --> lowercase)
+        if(isLowerCase) offset -= DISTANCE_BETWEEN_ASCII_LOWER_UPPER;//if the letter is lowercase , we gotta decrement the distance between the two alphabets
         argsToken |= 1 << offset;
     }
     return argsToken;
@@ -580,11 +590,76 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     return parsedCommand;
 }
 
+/*
+when we start to check each and every file and if its a dir we call the function again but we modify the scanned dir to be the sub-dir and return once it gets to the end
+*/
 
-bool lsRecursive(ShellCommand* currCommand,char* cwd)//WIP
+
+//NOTE: for simplicity and testing, the first lsRecursive version WILL be without any checking of other command flags(only -R)
+void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
 {
-    return true;
+
+    WIN32_FIND_DATA findData;
+    ZeroMemory(&findData, sizeof(WIN32_FIND_DATA)); // The Windows way to memset
+    HANDLE hFind = FindFirstFile(search_path,&findData);
+
+    if(hFind == INVALID_HANDLE_VALUE)
+    {
+        DWORD error = GetLastError();
+        if(error == ERROR_ACCESS_DENIED)
+        {
+            printf("permission denied : '%s'\n",search_path);
+        }
+        // else if (error == ERROR_FILE_NOT_FOUND) --> this is how to check if a file is empty
+        return;
+    }
+    //cycle through the folder, the moment we find another folder - we cycling through it through an additional function call
+    
+    do {
+        if(findData.cFileName[0] == '.') continue;//if its a . / .. directory --> skippinnn!!
+        //print the offset\padding:
+        for(int i = 0;i < offset; i++) printf("  ");
+        //print the actual find:
+        printf("%s\n",findData.cFileName);
+        if(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
+        {//tatoo the current folder to our search_path
+            search_path[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
+            int tempLen = strlen(search_path) + strlen(findData.cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
+            char temp[tempLen];
+            strcpy(temp,search_path);
+            //cut the last * before moving to the next dir to avoid something like this: D:/Games/*/*/*/*, we dont want that right gentlemen?
+            //add the new additional dir --> prev/curr/*
+            strcat(temp,"/");
+            strcat(temp,findData.cFileName);
+            strcat(temp,"/*");
+            lsRecursive(currCommand,cwd,temp,offset + 1);
+        }
+    } while(FindNextFile(hFind,&findData) != 0);
+    FindClose(hFind);
+    return;
 }
+
+void lsRecursiveWrapper(ShellCommand* currCommand,char* cwd)//Wrapper function
+{
+    char search_path[256];
+    snprintf(search_path, 256, "%s/*",currCommand->path1);
+    int offset = 0;
+    lsRecursive(currCommand,cwd,search_path,offset);//the fourth arg for the function is the offset
+    //the offset will be incremented from each level of recursive searching,so in the highest folder it'll be 0, and in the next inner one itll be 1 so it will look like this example:
+    /*
+    folder
+        folder 2
+        file 1
+        folder 3
+            folder 4
+            file 2
+            file 3
+        folder 5
+    */
+}
+
+
+
 
 void lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
 {
@@ -609,12 +684,16 @@ bool ls(ShellCommand* currCommand,char* cwd)
 {
     uint64_t* args = (uint64_t*)(currCommand->args);
     bool noArgs = !args;//we wont check args at all if there are none for the duration of the commands doings
-    if(noArgs)
+    if(noArgs)//we can safely return true after since there cannot be any errors with args, and the shell commmand already finished the user inputs path
     {
         lsNoArgs(currCommand,cwd);
         return true;
     }
-    bool isRecursive = ARG_EXISTS(*args,'R');//check if the bit on the offset for recursiveness is on
+    bool isRecursive = arg_exists(*args,'R');//check if the bit on the offset for recursiveness is on
+    if(isRecursive)//here we will have to jump to a whole different sub-function since the scanning of files here is entierly different:
+    {
+        lsRecursiveWrapper(currCommand,cwd);
+    }
 
     //flags that tells how to print out the file info
     // bool l = strchr(currCommand->args,'l') != NULL;//uses a long listing format, show perms, num of links, owner, group, size in bytes, and the last time of modification
@@ -647,7 +726,7 @@ bool ls(ShellCommand* currCommand,char* cwd)
 
 int main()
 {
-    char cwd[] = "D:/Games";//first default cwd, in the future will be modifiable
+    char cwd[] = "D:";//first default cwd, in the future will be modifiable
     char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
     {
@@ -663,7 +742,8 @@ int main()
             printf("Closing current shell...\n");
             break;
         }
-        if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
+        // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
+        if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//lsRecursive basic test
 
 
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
