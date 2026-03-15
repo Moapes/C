@@ -51,11 +51,11 @@ static const CommandRule COMMAND_DB[] = {
 
 
 
-bool arg_exists(uint64_t offsetString,char c)
+bool arg_exists(uint64_t* offsetString,char c)
 {
     bool isLowerCase = c >= 'a' && c <= 'z';
     if(isLowerCase) isLowerCase - DISTANCE_BETWEEN_ASCII_LOWER_UPPER;
-    return offsetString | 1U << c - 'A';
+    return *offsetString | 1U << c - 'A';
 }
 
 int sumOfDirParts(char* dir)
@@ -275,10 +275,12 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
         }
     }
     //build the actual char*
+    memset(finalDestinationPath, 0, sizeof(finalDestinationPath));//remove memory garbage first
+
     for(int dih = 0; dih < iOfCompletePath; dih++)
     {
         strcat(finalDestinationPath,completePath[dih]);
-        if(dih + 1 != iOfCompletePath) strcat(finalDestinationPath,"/");
+        if(dih + 1 != iOfCompletePath) strcat(finalDestinationPath,"/");//the if insures we do not 
     }
 }
 
@@ -299,7 +301,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
     char* argsToken = NULL;
     char* path1Token = NULL;
     char* path2Token = NULL;
-    int countOfSection;
+    int countOfSection = 0;
 
     static char errorBuffer[256];
     
@@ -352,7 +354,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
     }
     if(!cmdExists)//if the command name input is incorrect we stop
     {
-        sprintf(errorBuffer,"The Command: '%s' is not recognised in the scope of this shell.",nameToken);
+        sprintf(errorBuffer,"The Command: '%s' is not recognised in the scope of this shell.\n",nameToken);
         return errorBuffer;
     }
 
@@ -373,7 +375,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
             } 
             if(!ArgFound)
             {
-                sprintf(errorBuffer,"The Argument/Flag '%c' is not recognised for the following Command : '%s'.",argsToken[a],COMMAND_DB[commandPos].name);
+                sprintf(errorBuffer,"The Argument/Flag '%c' is not recognised for the following Command : '%s'.\n",argsToken[a],COMMAND_DB[commandPos].name);
                 return errorBuffer;
             }
         }
@@ -392,7 +394,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
         {
             if(path1Token)
             {
-                sprintf(errorBuffer,"Unknown command argument: '%s'",path1Token);
+                sprintf(errorBuffer,"Unknown command argument: '%s'\n",path1Token);
                 return errorBuffer;
             }
         }
@@ -400,7 +402,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
         {
             if(COMMAND_DB[commandPos].path1Requirements[0] == 'T' && !path1Token)//path required and not given
             {
-                sprintf(errorBuffer,"(1) Argument missing (PATH)");
+                sprintf(errorBuffer,"(1) Argument missing (PATH)\n");
                 return errorBuffer;
             }
 
@@ -411,16 +413,16 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
                 switch (pathAccessable(path1Token))
                 {
                     case 'F'://path doesn't exists
-                        sprintf(errorBuffer,"The given path: '%s' doesn't exist on this device",path1Token);
+                        sprintf(errorBuffer,"The given path: '%s' doesn't exist on this device\n",path1Token);
                         return errorBuffer;
                     case 'P'://path exists but innecasible(insufficient perms)
-                        sprintf(errorBuffer,"Insufficient permissions for the given path: ''");
+                        sprintf(errorBuffer,"Insufficient permissions for the given path: ''\n");
                     case 'T'://path accessable!
                         char pathType = determinePathType(path1Token);
                         char pathTypeRequired = COMMAND_DB[commandPos].path1Requirements[1];
                         if(pathTypeRequired != pathType)
                         {   
-                            sprintf(errorBuffer,"Wrong path type given(%s instead of %s)",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
+                            sprintf(errorBuffer,"Wrong path type given(%s instead of %s)\n",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
                             return errorBuffer;
                         }
                         return NULL;
@@ -435,7 +437,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
                         sprintf(errorBuffer,"failed to create the new %s, incorrect Directory\n",path1Requirements[1] == 'D' ? "Directroy" : "File");
                         return errorBuffer;
                     case 'P':
-                        sprintf(errorBuffer,"insufficient permissions to access the directory");
+                        sprintf(errorBuffer,"insufficient permissions to access the directory\n");
                         return errorBuffer;
                     case 'T':
                         //success
@@ -466,7 +468,7 @@ uint64_t loadArgsToken(char* token)
         
         int offset = token[i] - 'A';//calc offset by the distance from the first letter of the two alphabets(uppercase --> lowercase)
         if(isLowerCase) offset -= DISTANCE_BETWEEN_ASCII_LOWER_UPPER;//if the letter is lowercase , we gotta decrement the distance between the two alphabets
-        argsToken |= 1 << offset;
+        argsToken |= 1U << offset;
     }
     return argsToken;
 }
@@ -486,8 +488,8 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
     char* nameToken = NULL; 
     uint64_t argsToken = 0;
-    char* path1Token = NULL;
-    char* path2Token = NULL;
+    char path1Token[256] = {0};
+    char path2Token[256] = {0};
     size_t nameLen = 0;
     size_t argsLen = 0;
     size_t path1Len = 0;
@@ -539,13 +541,13 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     //if path1 is optional and was not inputted - we have to put the cwd instead
     if(countOfSection <= 3 && path1Len == 0)
     {
-        path1Token = cwd;
+        strcpy(path1Token,cwd);
         path1Len = strlen(cwd) + 1;
     }
     //same goes with path2
     else if(countOfSection == 4 && path2Len == 0)
     {
-        path2Token = cwd;
+        strcpy(path2Token,cwd);
         path2Len = strlen(cwd) + 1;
     }
 
@@ -614,25 +616,32 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
         return;
     }
     //cycle through the folder, the moment we find another folder - we cycling through it through an additional function call
-    
+    bool showAll = arg_exists(currCommand->args,'a');
     do {
-        if(findData.cFileName[0] == '.') continue;//if its a . / .. directory --> skippinnn!!
+        bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
+        if(isHidden && !showAll) continue;//if its hidden and there is no -a flag we skip
+        bool isNavigationDot = findData.cFileName[0] == '.';
+        if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
+
         //print the offset\padding:
         for(int i = 0;i < offset; i++) printf("  ");
         //print the actual find:
         printf("%s\n",findData.cFileName);
-        if(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
-        {//tatoo the current folder to our search_path
-            search_path[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
-            int tempLen = strlen(search_path) + strlen(findData.cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
-            char temp[tempLen];
-            strcpy(temp,search_path);
-            //cut the last * before moving to the next dir to avoid something like this: D:/Games/*/*/*/*, we dont want that right gentlemen?
-            //add the new additional dir --> prev/curr/*
-            strcat(temp,"/");
-            strcat(temp,findData.cFileName);
-            strcat(temp,"/*");
-            lsRecursive(currCommand,cwd,temp,offset + 1);
+        if(!isNavigationDot)//of course we will print . / .. but not explore it
+        {
+            if(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
+            {//tatoo the current folder to our search_path
+                search_path[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
+                int tempLen = strlen(search_path) + strlen(findData.cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
+                char temp[tempLen];
+                strcpy(temp,search_path);
+                //cut the last * before moving to the next dir to avoid something like this: D:/Games/*/*/*/*, we dont want that right gentlemen?
+                //add the new additional dir --> prev/curr/*
+                strcat(temp,"/");
+                strcat(temp,findData.cFileName);
+                strcat(temp,"/*");
+                lsRecursive(currCommand,cwd,temp,offset + 1);
+            }
         }
     } while(FindNextFile(hFind,&findData) != 0);
     FindClose(hFind);
@@ -672,12 +681,12 @@ void lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
     HANDLE hFind = FindFirstFile(search_path,&findData);
 
     //itirate through the dir until we find the border
-    while(FindNextFile(hFind, &findData ) != 0 ) 
+    do
     {
-        if(findData.cFileName[0] == '.') continue; //skip .. and . dirs
+        if(findData.cFileName[0] == '.' || findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN && !arg_exists(currCommand->args,'a')) continue; //skip .. and . dirs if there is no -a flag
         printf("%s \n",findData.cFileName);
         
-    }
+    }while(FindNextFile(hFind, &findData ) != 0 );
 }
 
 bool ls(ShellCommand* currCommand,char* cwd)
@@ -689,7 +698,8 @@ bool ls(ShellCommand* currCommand,char* cwd)
         lsNoArgs(currCommand,cwd);
         return true;
     }
-    bool isRecursive = arg_exists(*args,'R');//check if the bit on the offset for recursiveness is on
+    bool isRecursive = arg_exists(args,'R');//check if the bit on the offset for recursiveness is on
+    bool showAll = arg_exists(args,'a');
     if(isRecursive)//here we will have to jump to a whole different sub-function since the scanning of files here is entierly different:
     {
         lsRecursiveWrapper(currCommand,cwd);
