@@ -48,6 +48,8 @@ static const CommandRule COMMAND_DB[] = {
 
 #define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 7
 
+#define MIN_CHILDREN_COUNT 16
+
 
 
 
@@ -616,12 +618,87 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
         return;
     }
     //cycle through the folder, the moment we find another folder - we cycling through it through an additional function call
-    bool showAll = arg_exists(currCommand->args,'a');
+    bool showAll = arg_exists(currCommand->args,'a');//check -a flag
+    bool showAlmostAll = arg_exists(currCommand->args,'A');//check -A flag
+
+    char sortType = '\0';//we will collectievly check all of the sort-related flags, and the farest one in the alphabet will get chosen(ASCII)
+    bool sortBySize = arg_exists(currCommand->args,'S');//sort by size, biggest first unless reversed
+    bool sortByTimeStamp = arg_exists(currCommand->args,'t');//recent first if not reversed
+    if(sortBySize) sortType = 't';
+    if(sortBySize) sortType = 'S';
+    bool reverseSort = arg_exists(currCommand->args,'r');//reverse the sorting if this flag is set
+
+    if(sortType) 
+    {
+        int childCount = 0;
+        int currentlyAllocatedCount = MIN_CHILDREN_COUNT;
+        WIN32_FIND_DATA* sortedFileArray = (WIN32_FIND_DATA*)miron_malloc(sizeof(WIN32_FIND_DATA) * MIN_CHILDREN_COUNT);
+        do{
+            bool isNavigationDot = findData.cFileName[0] == '.';
+            if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
+
+            bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
+            if(isHidden &&  !showAlmostAll)
+            {
+                if(!showAll) continue;//if its hidden and there is no -a flag we skip
+            }
+            
+            if(childCount == currentlyAllocatedCount)//we hit the limit/ re-allocate
+            {
+                currentlyAllocatedCount *= 2; //expand the allocated amount
+                WIN32_FIND_DATA* newSortedFileArray = (WIN32_FIND_DATA*)miron_malloc(sizeof(WIN32_FIND_DATA) * currentlyAllocatedCount);
+                //copy the old array data to the new one:
+                memcpy(newSortedFileArray,sortedFileArray,sizeof(WIN32_FIND_DATA) * currentlyAllocatedCount);
+
+                freeMemBlock(sortedFileArray);
+                sortedFileArray = newSortedFileArray;//make the og one point to the new one
+            }
+
+            //register the found child and insert it to the not sorted yet array:
+            childCount++;
+            memcpy(sortedFileArray,&findData,sizeof(WIN32_FIND_DATA));
+        } while(FindNextFile(hFind,&findData) != 0);
+
+
+        // WIN32_FIND_DATA* sortedFileArray = (WIN32_FIND_DATA*)miron_malloc(sizeof(WIN32_FIND_DATA) * childCount);//allocate space for the sortedFileArray(thats why we counted the children amount)
+        // //now the next step is to actually store all the child pointers o the sortedFileArray, this time we use the firstChild pointer since findData was already used and now points to NULL
+        // int childrenFound = 0;
+        // do
+        // {
+        //     bool isNavigationDot = findData.cFileName[0] == '.';
+        //     if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
+
+        //     bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
+        //     if(isHidden &&  !showAlmostAll)
+        //     {
+        //         if(!showAll) continue;//if its hidden and there is no -a flag we skip
+        //     }
+        //     childrenFound++;
+        // } while(childrenFound <= childCount);
+
+
+        // //lastly, we take our prepared array with all of the children and sort them by the sorting method and direction(Reversed or not)
+        
+        // do
+        // {
+
+        // }while
+    }
+
+
+
+
     do {
-        bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
-        if(isHidden && !showAll) continue;//if its hidden and there is no -a flag we skip
+
         bool isNavigationDot = findData.cFileName[0] == '.';
         if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
+
+        bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
+        if(isHidden &&  !showAlmostAll)
+        {
+            if(!showAll) continue;//if its hidden and there is no -a flag we skip
+        } 
+        
 
         //print the offset\padding:
         for(int i = 0;i < offset; i++) printf("  ");
@@ -700,6 +777,7 @@ bool ls(ShellCommand* currCommand,char* cwd)
     }
     bool isRecursive = arg_exists(args,'R');//check if the bit on the offset for recursiveness is on
     bool showAll = arg_exists(args,'a');
+    bool showAlmostAll = arg_exists(args,'A');
     if(isRecursive)//here we will have to jump to a whole different sub-function since the scanning of files here is entierly different:
     {
         lsRecursiveWrapper(currCommand,cwd);
