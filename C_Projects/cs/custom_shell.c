@@ -308,24 +308,49 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
     }
 }
 
-// char validatePath()
 
-
-
-void loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot)
+//takes the remaining user input after the args block, here we will take the remaining user input block and well.. load it and return error string if required
+char* loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot,int originalFullLen,int startingIndex)
 {
+    char* firstSlot = inputBuffer[startingIndex];
+    if(*firstSlot != '"') return "Invalid syntax for dir path(quatation)\n";//to avoid something like this: D:"\Games\Lethal Company"(bad) :(
+    //now time to actually track the next appearance of the qoutations:
+    char* secondSlot = strchr(firstSlot + 1, '"');
+    if(secondSlot == NULL) return "Invalid syntax for dir path(qoutation)\n";
+    memcpy(path1Slot,firstSlot,(size_t)(secondSlot - firstSlot));//first path ready
 
+    //TIME FOR THE SECOND PATH:
+    int spaceCount = strspn(secondSlot + 1," ");
+    char* thirdSlot = &secondSlot + spaceCount + 1;
+    char* fourthSlot;//made it here so it is recognasiable for the afterslotscanner
+    if(&thirdSlot - &inputBuffer <= originalFullLen)
+    {
+        if(*thirdSlot != '"') return "Invalid syntax for dir path(quatation)\n";
+        fourthSlot = strchr(thirdSlot + 1,'"');
+        if(fourthSlot == NULL) return "Invalid syntax for dir path(qoutation)\n";
+        memcpy(path2Slot,thirdSlot,(size_t)(fourthSlot - thirdSlot));//second path ready
+    }
+    //insure we aint got sum sneaky after the second quotations:
+    char* afterSlotsScanner = fourthSlot + 1;
+    while(&afterSlotsScanner < &inputBuffer + originalFullLen);
+    {
+        if(*afterSlotsScanner != " ") return "Invalid syntax after function arguments\n";
+        afterSlotsScanner += 1;
+    }
+
+    return NULL;
 }
 
 
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
-char* checkInputErrors(char* targetInputBuffer,char* cwd,char* nT,char* p1,char* p2)
+char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args,char* p1,char* p2)
 {
     char inputBuffer[1024];
     strcpy(inputBuffer, targetInputBuffer);
 
     if(!inputBuffer || inputBuffer[0] == '\0') return NULL;
-
+    int originalFullLen = strlen(targetInputBuffer);//original size for safe iteration
+    int lenOfArgsAndName = 0;//length of the args and file name, so we can use this number to jump to the index in the input buffer that can contain only paths from that way forward
     char* nameToken = NULL; 
     char* argsToken = NULL;
     char* path1Token = NULL;
@@ -335,31 +360,39 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* nT,char* p1,char*
     static char errorBuffer[256];
     
     char* token = strtok(inputBuffer, " ");
+    bool stop = false;
 
-    while(token != NULL)
+    while(token != NULL && !stop)
     {
         switch (countOfSection)
         {
             case 0:
                 nameToken = token;
+                int spaceCount = strspn(&token[strlen(token)] ," ");//check how much spaces we gotta skip from now on
+                lenOfArgsAndName = (int)(&token[strlen(token) - 1] - &inputBuffer) + spaceCount;
                 break;
 
             case 1:
-                if (token[0] == '-') argsToken = token; 
-                else path1Token = token;
+                if (token[0] == '-')
+                {
+                    argsToken = token;
+                    int spaceCount = strspn(&token[strlen(token)] ," ");//check how much spaces we gotta skip from now on
+                    lenOfArgsAndName = (int)(&token[strlen(token) - 1] - &inputBuffer) + 1;
+                }
+                else stop = true;
                 break;
 
             case 2:
-                path1Token = token;
-                break;
-            case 3:
-                path2Token = token;
-                break;
+                stop = true;
                 
         }
-
         countOfSection++;
-     
+        if(!stop) token = strtok(NULL, " ");
+    }
+    if(lenOfArgsAndName <= originalFullLen)//if there is more to the input then the args and command name
+    {
+        char* error = loadUserPathInput(inputBuffer,path1Token,path2Token,originalFullLen,lenOfArgsAndName);
+        if(error != NULL) printf("%s",error);
     }
 
     //checkup for the command itself
@@ -475,9 +508,11 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* nT,char* p1,char*
             }
         }
     }
-
-
-
+    //if we passed all the tests.. we load all the info up to the command block args:
+    *fN = nameToken;
+    *args = loadsArgsToken(argsToken);
+    *p1 = path1Token;
+    *p2 = path2Token;
     return NULL;
 
 }
