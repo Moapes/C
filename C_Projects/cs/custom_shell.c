@@ -312,9 +312,14 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 
 
 
+void loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot)
+{
+
+}
+
 
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
-char* checkInputErrors(char* targetInputBuffer,char* cwd)
+char* checkInputErrors(char* targetInputBuffer,char* cwd,char* nT,char* p1,char* p2)
 {
     char inputBuffer[1024];
     strcpy(inputBuffer, targetInputBuffer);
@@ -354,7 +359,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
         }
 
         countOfSection++;
-        token = strtok(NULL, " ");        
+     
     }
 
     //checkup for the command itself
@@ -477,6 +482,28 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
 
 }
 
+//the path has to be valid tho:(only returns the first path)
+char* returnPathFromPrts(char* pathsInput,int* endIndex)
+{
+    int start = 0;
+    int end = 0;
+    char* firstSpot = strchr(pathsInput,'"');
+    if(firstSpot == NULL) return NULL;
+    //convert the firstSpot to the index:
+    start = (int)(firstSpot - pathsInput);
+    char* secondSpot = strchr(pathsInput + start,'"');
+    if(secondSpot == NULL) return NULL;
+    end = (int)(secondSpot - pathsInput);
+    int len = end - start;
+    char* clearPath[len];
+    memcpy(clearPath,pathsInput + start, len);
+    *endIndex = end;//provide the caller with the length
+    return clearPath;
+}
+
+
+
+
 //the function will take modify the token of args and make it so it turns to a string of offsetted bits corresponding to their position in the A-z spot
 //for example the flag B will be at offset 1 
 
@@ -522,10 +549,10 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     char* token = strtok(inputBuffer, " ");
     int countOfSection = 0;
 
-    bool foundFirstQoutes = false;
+    bool stop = false;
 
 
-    while (token != NULL)
+    while (token != NULL && !stop)
     {
         switch (countOfSection)
         {
@@ -540,29 +567,37 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
                 {
                     argsToken = loadArgsToken(token);
                     argsLen = sizeof(uint64_t);
+                    token = strtok(NULL, " ");
                 }
                 else
                 {
-                    generateAbsolutePath(token,cwd,path1Token);
-                    path1Len = strlen(path1Token) + 1;
-                    countOfSection++;
+                    // generateAbsolutePath(token,cwd,path1Token);
+                    // path1Len = strlen(path1Token) + 1;
+                    // countOfSection++;
+                    stop = true;
                 }
                 break;
 
             case 2:
-                generateAbsolutePath(token,cwd,path1Token);
-                path1Len = strlen(path1Token) + 1;
-                break;
-            case 3:
-                generateAbsolutePath(token,cwd,path1Token);
-                path2Len = strlen(path2Token) + 1;
+                // generateAbsolutePath(token,cwd,path1Token);
+                // path1Len = strlen(path1Token) + 1;
+                // break;
+                stop = true;
                 break;
         }   
 
         countOfSection++;
-        token = strtok(NULL, " ");
+
     }
     //if path1 is optional and was not inputted - we have to put the cwd instead
+    if(stop)
+    {
+        //we will check check where are the two paranthesese are placed at
+        int* endIndex = 0;//we will put this index to the function that generates the return pathfromptrs so we can then know from what index to keep going.
+        generateAbsolutePath(path1Token,cwd,returnPathFromPtrs(inputBuffer,endIndex));
+        
+
+    }
     if(countOfSection <= 3 && path1Len == 0)
     {
         strcpy(path1Token,cwd);
@@ -570,7 +605,7 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     }
     //same goes with path2
     else if(countOfSection == 4 && path2Len == 0)
-    {
+    { 
         strcpy(path2Token,cwd);
         path2Len = strlen(cwd) + 1;
     }
