@@ -46,18 +46,40 @@ static const CommandRule COMMAND_DB[] = {
 
 #define NUMBER_OF_FLAGS 52
 
-#define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 7
+#define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 6
 
 #define MIN_CHILDREN_COUNT 16
 
 
 
+void print_binary64(uint64_t n) {
+    // We iterate from the most significant bit (63) down to 0
+    for (int i = 63; i >= 0; i--) {
+        // Create a mask with a 1 at the current position 'i'
+        // Then bitwise AND it with our number 'n'
+        uint64_t mask = (uint64_t)1 << i;
+        
+        if (n & mask) {
+            printf("1");
+        } else {
+            printf("0");
+        }
+
+        // Optional: Add a space every 8 bits for readability
+        if (i > 0 && i % 8 == 0) {
+            printf(" ");
+        }
+    }
+    printf("\n");
+}
 
 bool arg_exists(uint64_t* offsetString,char c)
 {
     bool isLowerCase = c >= 'a' && c <= 'z';
-    if(isLowerCase) isLowerCase - DISTANCE_BETWEEN_ASCII_LOWER_UPPER;
-    return *offsetString | 1U << c - 'A';
+    int offset = c - 'A';
+
+    if(isLowerCase) offset -= DISTANCE_BETWEEN_ASCII_LOWER_UPPER;
+    return *offsetString & ((uint64_t)1 << offset);
 }
 
 int sumOfDirParts(char* dir)
@@ -464,7 +486,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd)
 uint64_t loadArgsToken(char* token)
 {
     uint64_t argsToken = 0;//make it ...00000000 first
-    for(int i = 0; i < sizeof(token); i++)
+    for(int i = 0; i < strlen(token); i++)
     {
         bool isLowerCase = token[i] >= 'a' && token[i] <= 'z';
         
@@ -500,7 +522,7 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     char* token = strtok(inputBuffer, " ");
     int countOfSection = 0;
 
-
+    bool foundFirstQoutes = false;
 
 
     while (token != NULL)
@@ -552,7 +574,8 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
         strcpy(path2Token,cwd);
         path2Len = strlen(cwd) + 1;
     }
-
+    // generateAbsolutePath(path1Token,cwd,path1Token);
+    // generateAbsolutePath(path2Token,cwd,path2Token);
     //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
     size_t totalSize = nameLen + argsLen + path1Len + path2Len;
 
@@ -572,8 +595,8 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     {
         uint64_t* tempDataStart = (uint64_t*)dataStart;
         parsedCommand->args = tempDataStart;
-        *dataStart = argsToken;
-        dataStart += argsLen;
+        *(uint64_t*)dataStart = argsToken;
+        dataStart += sizeof(uint64_t);
     }
     else parsedCommand->args = NULL;
 
@@ -594,6 +617,26 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     return parsedCommand;
 }
 
+
+
+void printLinkTarget(const char* linkPath) {
+    // 1. Open the link file (but don't follow it yet!)
+    HANDLE hFile = CreateFileA(linkPath, 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, 
+                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+
+    if (hFile != INVALID_HANDLE_VALUE) {
+        char targetPath[MAX_PATH];
+        // 2. Ask Windows for the "Final" destination
+        DWORD length = GetFinalPathNameByHandleA(hFile, targetPath, MAX_PATH, FILE_NAME_NORMALIZED);
+        
+        if (length > 0 && length < MAX_PATH) {
+            // Windows adds a "\\?\" prefix to long paths, let's skip it for display
+            char* displayPath = (strncmp(targetPath, "\\\\?\\", 4) == 0) ? targetPath + 4 : targetPath;
+            printf(" -> %s", displayPath);
+        }
+        CloseHandle(hFile);
+    }
+}
 /*
 when we start to check each and every file and if its a dir we call the function again but we modify the scanned dir to be the sub-dir and return once it gets to the end
 */
@@ -602,7 +645,6 @@ when we start to check each and every file and if its a dir we call the function
 //NOTE: for simplicity and testing, the first lsRecursive version WILL be without any checking of other command flags(only -R)
 void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
 {
-
     WIN32_FIND_DATA findData;
     ZeroMemory(&findData, sizeof(WIN32_FIND_DATA)); // The Windows way to memset
     HANDLE hFind = FindFirstFile(search_path,&findData);
@@ -628,68 +670,11 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
     if(sortBySize) sortType = 'S';
     bool reverseSort = arg_exists(currCommand->args,'r');//reverse the sorting if this flag is set
 
-    if(sortType) 
-    {
-        int childCount = 0;
-        int currentlyAllocatedCount = MIN_CHILDREN_COUNT;
-        WIN32_FIND_DATA* sortedFileArray = (WIN32_FIND_DATA*)miron_malloc(sizeof(WIN32_FIND_DATA) * MIN_CHILDREN_COUNT);
-        do{
-            bool isNavigationDot = findData.cFileName[0] == '.';
-            if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
-
-            bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
-            if(isHidden &&  !showAlmostAll)
-            {
-                if(!showAll) continue;//if its hidden and there is no -a flag we skip
-            }
-            
-            if(childCount == currentlyAllocatedCount)//we hit the limit/ re-allocate
-            {
-                currentlyAllocatedCount *= 2; //expand the allocated amount
-                WIN32_FIND_DATA* newSortedFileArray = (WIN32_FIND_DATA*)miron_malloc(sizeof(WIN32_FIND_DATA) * currentlyAllocatedCount);
-                //copy the old array data to the new one:
-                memcpy(newSortedFileArray,sortedFileArray,sizeof(WIN32_FIND_DATA) * currentlyAllocatedCount);
-
-                freeMemBlock(sortedFileArray);
-                sortedFileArray = newSortedFileArray;//make the og one point to the new one
-            }
-
-            //register the found child and insert it to the not sorted yet array:
-            childCount++;
-            memcpy(sortedFileArray,&findData,sizeof(WIN32_FIND_DATA));
-        } while(FindNextFile(hFind,&findData) != 0);
-
-
-        // WIN32_FIND_DATA* sortedFileArray = (WIN32_FIND_DATA*)miron_malloc(sizeof(WIN32_FIND_DATA) * childCount);//allocate space for the sortedFileArray(thats why we counted the children amount)
-        // //now the next step is to actually store all the child pointers o the sortedFileArray, this time we use the firstChild pointer since findData was already used and now points to NULL
-        // int childrenFound = 0;
-        // do
-        // {
-        //     bool isNavigationDot = findData.cFileName[0] == '.';
-        //     if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
-
-        //     bool isHidden = (findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN);
-        //     if(isHidden &&  !showAlmostAll)
-        //     {
-        //         if(!showAll) continue;//if its hidden and there is no -a flag we skip
-        //     }
-        //     childrenFound++;
-        // } while(childrenFound <= childCount);
-
-
-        // //lastly, we take our prepared array with all of the children and sort them by the sorting method and direction(Reversed or not)
-        
-        // do
-        // {
-
-        // }while
-    }
-
-
-
-
-    do {
-
+    int childCount = 0;
+    int currentlyAllocatedCount = MIN_CHILDREN_COUNT;
+    WIN32_FIND_DATA** sortedFileArray = (WIN32_FIND_DATA**)malloc(sizeof(WIN32_FIND_DATA*) * MIN_CHILDREN_COUNT);
+    WIN32_FIND_DATA* filesArray = (WIN32_FIND_DATA*)malloc(sizeof(WIN32_FIND_DATA) * MIN_CHILDREN_COUNT);
+    do{
         bool isNavigationDot = findData.cFileName[0] == '.';
         if(isNavigationDot && !showAll) continue; //if its a . / .. and there is no -a flag we skip aswell
 
@@ -697,31 +682,133 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
         if(isHidden &&  !showAlmostAll)
         {
             if(!showAll) continue;//if its hidden and there is no -a flag we skip
-        } 
+        }
         
+        if(childCount == currentlyAllocatedCount)//we hit the limit/ re-allocate
+        {
+            currentlyAllocatedCount *= 2; //expand the allocated amount
+            WIN32_FIND_DATA** temp1 = realloc(sortedFileArray,sizeof(WIN32_FIND_DATA*) * currentlyAllocatedCount);
+            WIN32_FIND_DATA* temp2 = realloc(filesArray,sizeof(WIN32_FIND_DATA) * currentlyAllocatedCount);
+            bool newArrayLocation = false;
+
+            if(temp2 != filesArray) //if memory management has led to switching places in the memory, we will have to resync all the pointers that point to the files
+            {
+                newArrayLocation = true;
+            }
+            if(temp1 != NULL) sortedFileArray = temp1;
+            if(temp2 != NULL) filesArray = temp2;       
+            if(newArrayLocation) for(int i = 0; i < childCount; i++) sortedFileArray[i] = &filesArray[i];//resync all the pointers
+        }
+        //register the found child and insert it to the not sorted yet array:
+
+        memcpy(&filesArray[childCount],&findData,sizeof(WIN32_FIND_DATA));
+        sortedFileArray[childCount] = &filesArray[childCount];
+        childCount++;
+    } while(FindNextFile(hFind,&findData) != 0);
+
+    //time to sort the loaded up array if needed:
+    if(sortType)
+    {
+        for(int i = 0; i < childCount; i++)
+        {
+            for(int j = i;j < childCount; j++)
+            {
+                //check if a swap is needed by the sortType
+                if(sortType == 't')
+                {
+                    if(reverseSort)//farest to recent
+                    {
+                        if(CompareFileTime(&sortedFileArray[i]->ftLastWriteTime,&sortedFileArray[j]->ftLastWriteTime) < 0)
+                        {
+                            WIN32_FIND_DATA* temp = sortedFileArray[j];
+                            sortedFileArray[j] = sortedFileArray[i];
+                            sortedFileArray[i] = temp; 
+                        }
+                    }
+                    else//recent to farest
+                    {
+                        if(CompareFileTime(&sortedFileArray[i]->ftLastWriteTime,&sortedFileArray[j]->ftLastWriteTime) > 0)
+                        {
+                            WIN32_FIND_DATA* temp = sortedFileArray[j];
+                            sortedFileArray[j] = sortedFileArray[i];
+                            sortedFileArray[i] = temp; 
+                        }
+                    }
+                }
+                else if(sortType == 'S')
+                {
+                    uint64_t currFileSize = ((uint64_t)sortedFileArray[j]->nFileSizeHigh << 32) + sortedFileArray[j]->nFileSizeLow;
+                    uint64_t targetFileSize = ((uint64_t)sortedFileArray[i]->nFileSizeHigh << 32) + sortedFileArray[i]->nFileSizeLow;
+                    if(reverseSort)//smallest to biggest
+                    {
+                        if(currFileSize < targetFileSize)
+                        {
+                            WIN32_FIND_DATA* temp = sortedFileArray[j];
+                            sortedFileArray[j] = sortedFileArray[i];
+                            sortedFileArray[i] = temp; 
+                        }
+                    }
+                    else//bigger to smallest
+                    {
+                        if(currFileSize > targetFileSize)
+                        {
+                            WIN32_FIND_DATA* temp = sortedFileArray[j];
+                            sortedFileArray[j] = sortedFileArray[i];
+                            sortedFileArray[i] = temp; 
+                        }
+                    }
+                }
+            }
+        }
+    }
+    bool showMoreFileInfo = arg_exists(currCommand->args,'l');
+    for(int i = 0; i < childCount; i++)
+    {
+        bool isNavigationDot = sortedFileArray[i]->cFileName[0] == '.';
 
         //print the offset\padding:
         for(int i = 0;i < offset; i++) printf("  ");
         //print the actual find:
-        printf("%s\n",findData.cFileName);
+        printf("%s",sortedFileArray[i]->cFileName);
+        DWORD attrs = sortedFileArray[i]->dwFileAttributes;
+        if(showMoreFileInfo)
+        {   
+            if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+            if(showAlmostAll || showAll) printf("  %s ",attrs & FILE_ATTRIBUTE_HIDDEN ? "(hidden)" : "");
+            if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+            {
+                printf("l");
+                printLinkTarget(sortedFileArray[i]->cFileName);
+            }
+            char x = '-';
+            char* name = sortedFileArray[i]->cFileName;
+            if(strstr(name,".exe") || strstr(name,".bat") || strstr(name,".cmd")) x = 'x';
+            printf("%c",attrs & FILE_ATTRIBUTE_DIRECTORY ? 'd' : '-');
+            printf("%s%c",attrs & FILE_ATTRIBUTE_READONLY ? "r-" : "rw",x);
+            
+            
+        }
+        printf("\n");
         if(!isNavigationDot)//of course we will print . / .. but not explore it
         {
-            if(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
+            if(sortedFileArray[i]->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
             {//tatoo the current folder to our search_path
-                search_path[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
-                int tempLen = strlen(search_path) + strlen(findData.cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
+                int tempLen = strlen(search_path) + strlen(sortedFileArray[i]->cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
                 char temp[tempLen];
                 strcpy(temp,search_path);
+                temp[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
                 //cut the last * before moving to the next dir to avoid something like this: D:/Games/*/*/*/*, we dont want that right gentlemen?
                 //add the new additional dir --> prev/curr/*
                 strcat(temp,"/");
-                strcat(temp,findData.cFileName);
+                strcat(temp,sortedFileArray[i]->cFileName);
                 strcat(temp,"/*");
                 lsRecursive(currCommand,cwd,temp,offset + 1);
             }
         }
-    } while(FindNextFile(hFind,&findData) != 0);
+    } 
     FindClose(hFind);
+    free(sortedFileArray);
+    free(filesArray);
     return;
 }
 
@@ -802,16 +889,6 @@ bool ls(ShellCommand* currCommand,char* cwd)
 }
 
 
-
-
-
-
-
-
-
-
-
-
 int main()
 {
     char cwd[] = "D:";//first default cwd, in the future will be modifiable
@@ -837,6 +914,13 @@ int main()
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
         freeMemBlock(currCommand);
     }
+    // char* chars = miron_malloc(4);
+    // fgets(chars, sizeof(chars),stdin);
+    // chars[strcspn(chars,"\n")] = 0;
+    // uint64_t n = loadArgsToken(chars);
+    // print_binary64(n);
+
+    
 
 
     // while(1)
