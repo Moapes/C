@@ -160,46 +160,9 @@ char pathCreatable(char *dir)
     }
     FindClose(hFind);
     return 'T';
-    // do
-    // {
-    //     if(strcmp(findData.cFileName,".") == 0 || strcmp(findData.cFileName,"..") == 0) continue;
-    //     else if(strcmp(findData.cFileName,headerToken) == 0)
-    //     {
-    //         FindClose(hFind);
-    //         return 'F';
-    //     } return 'F';
-    // } while (FindNextFile(hFind,&findData));
-
-    // FindClose(hFind);
-    // return 'T';
 
 }
 
-//cwd - current workin directory
-//the idea - we will loop from start to end on parts of the path, devided by the '/' thingy
-/*
-NOTES: we cannot go back from the root dir which is C:/ or D:/ (.. operation)
-
-first handle the most upper part of the dir:
-- if its starts like this C:/ or D:/ it starts as an absolute path
-- if it starts with regular letters, like lets say Documents/etc.. we have to treat it as ./Documents meaning we append the CWD at the start
-- if it starts with a ../ --> we have to go back one dir from the CWD and then keep going with it -> so ../Documents can be become C:/Users/Miron/Documents when the CWD was C:/Miron/Pictures
-- if it starts with a / -> we simply treat it like a ./ as in the second point
-
-
-in the middle
-if there is a ./ or a /./ at any point we just jump to the next token
-if there is a .. at any point, what we do is we cut the complete path back by the most upfront path - so C:/Users/Miron/Documents becomes C:/Users/Miron
-*/
-
-/*
-refined idea:
-we will go from the lowest point of the dir to the highest, basically reading the tokens from last to first by crafting an array of all the tokens
-we will constantly check if we start to go over the CWD 
-once we hit a .. -> we will enter a while loop that will - until the last .. sum up the amount of times we need to remove the smallest dir part from the temp CWD
-our goal is at some point.. meet the end of the CWD - which is the disk itself e.g: D:/ or P:/ any letter Combo that represents a root drive
-
-*/
 void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 {
     char userInputPath[256];
@@ -312,7 +275,7 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 //takes the remaining user input after the args block, here we will take the remaining user input block and well.. load it and return error string if required
 char* loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot,int originalFullLen,int startingIndex)
 {
-    char* firstSlot = inputBuffer[startingIndex];
+    char* firstSlot = &inputBuffer[startingIndex];
     if(*firstSlot != '"') return "Invalid syntax for dir path(quatation)\n";//to avoid something like this: D:"\Games\Lethal Company"(bad) :(
     //now time to actually track the next appearance of the qoutations:
     char* secondSlot = strchr(firstSlot + 1, '"');
@@ -321,7 +284,7 @@ char* loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot,int or
 
     //TIME FOR THE SECOND PATH:
     int spaceCount = strspn(secondSlot + 1," ");
-    char* thirdSlot = &secondSlot + spaceCount + 1;
+    char* thirdSlot = secondSlot + spaceCount + 1;
     char* fourthSlot;//made it here so it is recognasiable for the afterslotscanner
     if(&thirdSlot - &inputBuffer <= originalFullLen)
     {
@@ -334,7 +297,7 @@ char* loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot,int or
     char* afterSlotsScanner = fourthSlot + 1;
     while(&afterSlotsScanner < &inputBuffer + originalFullLen);
     {
-        if(*afterSlotsScanner != " ") return "Invalid syntax after function arguments\n";
+        if(*afterSlotsScanner != ' ') return "Invalid syntax after function arguments\n";
         afterSlotsScanner += 1;
     }
 
@@ -345,55 +308,97 @@ char* loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot,int or
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
 char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args,char* p1,char* p2)
 {
-    char inputBuffer[1024];
-    strcpy(inputBuffer, targetInputBuffer);
-
-    if(!inputBuffer || inputBuffer[0] == '\0') return NULL;
+    if(!targetInputBuffer || targetInputBuffer[0] == '\0') return NULL;
     int originalFullLen = strlen(targetInputBuffer);//original size for safe iteration
-    int lenOfArgsAndName = 0;//length of the args and file name, so we can use this number to jump to the index in the input buffer that can contain only paths from that way forward
     char* nameToken = NULL; 
     char* argsToken = NULL;
     char* path1Token = NULL;
     char* path2Token = NULL;
     int countOfSection = 0;
+    //these two variables will help us determine boundaries:
+    int start = 0;
+    int end = 0;
 
     static char errorBuffer[256];
-    
-    char* token = strtok(inputBuffer, " ");
-    bool stop = false;
+    char* currPtr = targetInputBuffer;//copy a pointer to the start to use it for advancing on the inputBuffer
 
-    while(token != NULL && !stop)
+    // --- 1. Get COMMAND NAME ---
+    start = strspn(currPtr, " "); 
+    // Use strcspn to find the first SPACE (the end of the word)
+    end = start + strcspn(currPtr + start, " "); 
+    nameToken = &targetInputBuffer[start];
+    targetInputBuffer[end] = '\0'; // Cut it
+
+    // --- 2. Advance to the NEXT section ---
+    currPtr = &targetInputBuffer[end + 1]; 
+    start = strspn(currPtr, " ");
+    currPtr += start; // Now currPtr is at the start of Args or Path1
+
+    bool argsMet = false;
+    bool path1Met = false;
+    // --- 3. Handle ARGS (if they exist) ---
+    if(&currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
     {
-        switch (countOfSection)
-        {
-            case 0:
-                nameToken = token;
-                int spaceCount = strspn(&token[strlen(token)] ," ");//check how much spaces we gotta skip from now on
-                lenOfArgsAndName = (int)(&token[strlen(token) - 1] - &inputBuffer) + spaceCount;
-                break;
-
-            case 1:
-                if (token[0] == '-')
-                {
-                    argsToken = token;
-                    int spaceCount = strspn(&token[strlen(token)] ," ");//check how much spaces we gotta skip from now on
-                    lenOfArgsAndName = (int)(&token[strlen(token) - 1] - &inputBuffer) + 1;
-                }
-                else stop = true;
-                break;
-
-            case 2:
-                stop = true;
-                
+        if (*currPtr == '-') {
+            argsToken = currPtr;
+            end = strcspn(currPtr, " "); 
+            currPtr[end] = '\0'; // Cut the args
+            
+            // Advance currPtr past the args to find Path1
+            currPtr += (end + 1);
+            currPtr += strspn(currPtr, " "); // Skip spaces after args
+            argsMet = true;
         }
-        countOfSection++;
-        if(!stop) token = strtok(NULL, " ");
+
+        // --- 4. Handle PATH 1 ---
+        if(&currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+        {
+            if (*currPtr == '"') {
+                path1Token = currPtr + 1; // Skip the opening "
+                end = strcspn(path1Token, "\""); // Find the closing "
+                
+                if (path1Token[end] == '\0') {
+                    sprintf(errorBuffer, "Syntax Error: Missing closing quote for Path 1\n");
+                    return errorBuffer;
+                }
+                
+                path1Token[end] = '\0'; // Cut the path
+                currPtr = &path1Token[end + 1]; // Move past Path 1
+                path1Met = true;
+            }
+        
+            if(!path1Met && !argsMet)//the user just typed random shii instead of opening for args or path
+            {
+                sprintf(errorBuffer,"Syntax Error: Unexpected input in the command call\n");
+                return errorBuffer;
+            }
+        }
+    
+        // --- 5. Handle PATH 2 ---
+        start = strspn(currPtr, " "); // Skip spaces between Path 1 and Path 2
+        currPtr += start;
+        if(&currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+        {
+
+            if (*currPtr == '"') {
+                path2Token = currPtr + 1; // Skip opening "
+                end = strcspn(path2Token, "\"");
+                
+                if (path2Token[end] == '\0') {
+                    sprintf(errorBuffer, "Syntax Error: Missing closing quote for Path 2\n");
+                    return errorBuffer;
+                }
+                
+                path2Token[end] = '\0'; // Cut Path 2
+            }
+            else//again, the user hasn't typed shii right, we need a "".. not a random character
+            {
+                sprintf(errorBuffer,"Syntax Error: Unexpected input in the command call\n");
+                return errorBuffer;        
+            }
+        }
     }
-    if(lenOfArgsAndName <= originalFullLen)//if there is more to the input then the args and command name
-    {
-        char* error = loadUserPathInput(inputBuffer,path1Token,path2Token,originalFullLen,lenOfArgsAndName);
-        if(error != NULL) printf("%s",error);
-    }
+
 
     //checkup for the command itself
     //1.it exists
@@ -426,6 +431,11 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args
     {
         //we strip the '-' part / we make the pointer to the string point to the index 1 [essentially cutting out the first '-' part]
         argsToken = argsToken + 1;
+        if(strlen(argsToken) == 0)//if the user just typed '-' and stopped
+        {
+            sprintf(errorBuffer,"Invalid Arguments Syntax: missing actual flags\n");
+            return errorBuffer;
+        }
         for(int a = 0; a < strlen(argsToken); a++)
         {
             bool ArgFound = false;
@@ -509,33 +519,13 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args
         }
     }
     //if we passed all the tests.. we load all the info up to the command block args:
-    *fN = nameToken;
-    *args = loadsArgsToken(argsToken);
-    *p1 = path1Token;
-    *p2 = path2Token;
+    memcpy(fN,nameToken,strlen(nameToken));
+    memcpy(args,argsToken,sizeof(uint64_t));
+    memcpy(p1,path1Token,strlen(path1Token));
+    memcpy(p2,path2Token,strlen(path2Token));
     return NULL;
 
 }
-
-//the path has to be valid tho:(only returns the first path)
-char* returnPathFromPrts(char* pathsInput,int* endIndex)
-{
-    int start = 0;
-    int end = 0;
-    char* firstSpot = strchr(pathsInput,'"');
-    if(firstSpot == NULL) return NULL;
-    //convert the firstSpot to the index:
-    start = (int)(firstSpot - pathsInput);
-    char* secondSpot = strchr(pathsInput + start,'"');
-    if(secondSpot == NULL) return NULL;
-    end = (int)(secondSpot - pathsInput);
-    int len = end - start;
-    char* clearPath[len];
-    memcpy(clearPath,pathsInput + start, len);
-    *endIndex = end;//provide the caller with the length
-    return clearPath;
-}
-
 
 
 
@@ -564,123 +554,54 @@ uint64_t loadArgsToken(char* token)
 //NOTE: WE WILL UPDATE IT SO THE CheckInputErrors function will already give us the tokens required for the parsing, so we won't do the parsing and the dir absolution 2 times and only 1 time, saving memmory and computing time
 ShellCommand* parse_input(char* inputBuffer,char* cwd)
 {
+    char* nameToken = NULL; 
+    uint64_t* argsToken = 0;
+    char path1Token[256] = {0};
+    char path2Token[256] = {0};
+
     if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
-    char* output = checkInputErrors(inputBuffer,cwd);
+    char* output = checkInputErrors(inputBuffer,cwd,nameToken,argsToken,path1Token,path2Token);
     if(output)
     {
         printf("%s",output);
         return NULL;
     }
 
-    char* nameToken = NULL; 
-    uint64_t argsToken = 0;
-    char path1Token[256] = {0};
-    char path2Token[256] = {0};
-    size_t nameLen = 0;
-    size_t argsLen = 0;
-    size_t path1Len = 0;
-    size_t path2Len = 0;
-
-    char* token = strtok(inputBuffer, " ");
-    int countOfSection = 0;
-
-    bool stop = false;
-
-
-    while (token != NULL && !stop)
-    {
-        switch (countOfSection)
-        {
-            case 0:
-
-                nameToken = token;
-                nameLen = strlen(nameToken) + 1;
-                break;
-
-            case 1:
-                if (token[0] == '-')
-                {
-                    argsToken = loadArgsToken(token);
-                    argsLen = sizeof(uint64_t);
-                    token = strtok(NULL, " ");
-                }
-                else
-                {
-                    // generateAbsolutePath(token,cwd,path1Token);
-                    // path1Len = strlen(path1Token) + 1;
-                    // countOfSection++;
-                    stop = true;
-                }
-                break;
-
-            case 2:
-                // generateAbsolutePath(token,cwd,path1Token);
-                // path1Len = strlen(path1Token) + 1;
-                // break;
-                stop = true;
-                break;
-        }   
-
-        countOfSection++;
-
-    }
-    //if path1 is optional and was not inputted - we have to put the cwd instead
-    if(stop)
-    {
-        //we will check check where are the two paranthesese are placed at
-        int* endIndex = 0;//we will put this index to the function that generates the return pathfromptrs so we can then know from what index to keep going.
-        generateAbsolutePath(path1Token,cwd,returnPathFromPtrs(inputBuffer,endIndex));
-        
-
-    }
-    if(countOfSection <= 3 && path1Len == 0)
-    {
-        strcpy(path1Token,cwd);
-        path1Len = strlen(cwd) + 1;
-    }
-    //same goes with path2
-    else if(countOfSection == 4 && path2Len == 0)
-    { 
-        strcpy(path2Token,cwd);
-        path2Len = strlen(cwd) + 1;
-    }
-    // generateAbsolutePath(path1Token,cwd,path1Token);
-    // generateAbsolutePath(path2Token,cwd,path2Token);
     //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
-    size_t totalSize = nameLen + argsLen + path1Len + path2Len;
+    size_t totalSize = strlen(nameToken) + sizeof(uint64_t) + strlen(path1Token) + strlen(path2Token);
 
     ShellCommand* parsedCommand = miron_malloc(sizeof(ShellCommand) + totalSize);
 
     char* dataStart = (char*)(parsedCommand + 1);
 
-    if(nameLen)
+    if(nameToken != NULL)
     {
         parsedCommand->commandName = dataStart;
-        memcpy(dataStart, nameToken, nameLen);
-        dataStart += nameLen;
+        memcpy(dataStart, nameToken, strlen(nameToken));
+        dataStart += strlen(nameToken);
     }
     else parsedCommand->commandName = NULL;
 
-    if(argsLen)
+    if(argsToken != 0)
     {
         uint64_t* tempDataStart = (uint64_t*)dataStart;
         parsedCommand->args = tempDataStart;
-        *(uint64_t*)dataStart = argsToken;
+        memcpy(dataStart, argsToken,sizeof(uint64_t));
         dataStart += sizeof(uint64_t);
     }
     else parsedCommand->args = NULL;
 
-    if(path1Len)
+    if(strlen(path1Token) != 0)
     {
         parsedCommand->path1 = dataStart;
-        memcpy(dataStart, path1Token, path1Len);
+        memcpy(dataStart, path1Token, strlen(path1Token));
     }
     else parsedCommand->path1 = NULL;
 
-    if(path2Len)
+    if(strlen(path2Token) != 0)
     {
         parsedCommand->path2 = dataStart;
-        memcpy(dataStart, path2Token, path2Len);
+        memcpy(dataStart, path2Token, strlen(path2Token));
     }
     else parsedCommand->path2 = NULL;
 
