@@ -75,6 +75,7 @@ void print_binary64(uint64_t n) {
 
 bool arg_exists(uint64_t* offsetString,char c)
 {
+    if(offsetString == 0) return false;
     bool isLowerCase = c >= 'a' && c <= 'z';
     int offset = c - 'A';
 
@@ -165,6 +166,12 @@ char pathCreatable(char *dir)
 
 void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 {
+    if(inputPath == NULL) 
+    {
+        memset(finalDestinationPath, 0, sizeof(finalDestinationPath));//remove memory garbage first
+        memcpy(finalDestinationPath,cwd,strlen(cwd));
+        return;
+    }
     char userInputPath[256];
     strncpy(userInputPath, inputPath, sizeof(userInputPath) - 1);
     char* completePath[256] = {0};
@@ -173,6 +180,7 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
     char* arrOfCWDPointers[128] = {0};
     //built an array of token pointers so we can scan it from top to bottom
     int i = 0;
+    
     while(token != NULL)
     {
         arrOfTokenPointers[i] = token;
@@ -209,7 +217,6 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
  
     else if(isupper(arrOfTokenPointers[0][0]) && arrOfTokenPointers[0][1] == ':')
     {
-        printf("absolute path found\n");
         isAbsolute = true;//root dir
     } 
 
@@ -272,41 +279,30 @@ void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
 }
 
 
-//takes the remaining user input after the args block, here we will take the remaining user input block and well.. load it and return error string if required
-char* loadUserPathInput(char* inputBuffer,char* path1Slot,char* path2Slot,int originalFullLen,int startingIndex)
+//the function will take modify the token of args and make it so it turns to a string of offsetted bits corresponding to their position in the A-z spot
+//for example the flag B will be at offset 1 
+
+//example:
+//input : ABD
+//output: ...000001011
+uint64_t loadArgsToken(char* token)
 {
-    char* firstSlot = &inputBuffer[startingIndex];
-    if(*firstSlot != '"') return "Invalid syntax for dir path(quatation)\n";//to avoid something like this: D:"\Games\Lethal Company"(bad) :(
-    //now time to actually track the next appearance of the qoutations:
-    char* secondSlot = strchr(firstSlot + 1, '"');
-    if(secondSlot == NULL) return "Invalid syntax for dir path(qoutation)\n";
-    memcpy(path1Slot,firstSlot,(size_t)(secondSlot - firstSlot));//first path ready
-
-    //TIME FOR THE SECOND PATH:
-    int spaceCount = strspn(secondSlot + 1," ");
-    char* thirdSlot = secondSlot + spaceCount + 1;
-    char* fourthSlot;//made it here so it is recognasiable for the afterslotscanner
-    if(&thirdSlot - &inputBuffer <= originalFullLen)
+    uint64_t argsToken = 0;//make it ...00000000 first
+    if(token == NULL) return 0;
+    for(int i = 0; i < strlen(token); i++)
     {
-        if(*thirdSlot != '"') return "Invalid syntax for dir path(quatation)\n";
-        fourthSlot = strchr(thirdSlot + 1,'"');
-        if(fourthSlot == NULL) return "Invalid syntax for dir path(qoutation)\n";
-        memcpy(path2Slot,thirdSlot,(size_t)(fourthSlot - thirdSlot));//second path ready
+        bool isLowerCase = token[i] >= 'a' && token[i] <= 'z';
+        
+        int offset = token[i] - 'A';//calc offset by the distance from the first letter of the two alphabets(uppercase --> lowercase)
+        if(isLowerCase) offset -= DISTANCE_BETWEEN_ASCII_LOWER_UPPER;//if the letter is lowercase , we gotta decrement the distance between the two alphabets
+        argsToken |= (uint64_t)1 << offset;
     }
-    //insure we aint got sum sneaky after the second quotations:
-    char* afterSlotsScanner = fourthSlot + 1;
-    while(&afterSlotsScanner < &inputBuffer + originalFullLen);
-    {
-        if(*afterSlotsScanner != ' ') return "Invalid syntax after function arguments\n";
-        afterSlotsScanner += 1;
-    }
-
-    return NULL;
+    return argsToken;
 }
 
 
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
-char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args,char* p1,char* p2)
+char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* args,char** p1,char** p2)
 {
     if(!targetInputBuffer || targetInputBuffer[0] == '\0') return NULL;
     int originalFullLen = strlen(targetInputBuffer);//original size for safe iteration
@@ -337,7 +333,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args
     bool argsMet = false;
     bool path1Met = false;
     // --- 3. Handle ARGS (if they exist) ---
-    if(&currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+    if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
     {
         if (*currPtr == '-') {
             argsToken = currPtr;
@@ -351,7 +347,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args
         }
 
         // --- 4. Handle PATH 1 ---
-        if(&currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+        if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
         {
             if (*currPtr == '"') {
                 path1Token = currPtr + 1; // Skip the opening "
@@ -377,7 +373,7 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args
         // --- 5. Handle PATH 2 ---
         start = strspn(currPtr, " "); // Skip spaces between Path 1 and Path 2
         currPtr += start;
-        if(&currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+        if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
         {
 
             if (*currPtr == '"') {
@@ -454,100 +450,72 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char* fN,uint64_t* args
     }
 
 
-
     //Check PATHS (will be the most complicated)
-    if(path1Token != NULL) 
+    //generate full path if it even exists ofc
+    //path1requirement check:
+    if(COMMAND_DB[commandPos].path1Requirements[0] == 'F')//path isnt allowed
     {
-        //generate full path if it even exists ofc
-        char* fullPath1 = (char*)miron_malloc(256);
-        generateAbsolutePath(path1Token,cwd,fullPath1);
-        //path1requirement check:
-        if(COMMAND_DB[commandPos].path1Requirements[0] == 'F')//path isnt allowed
+        if(*p1)
         {
-            if(path1Token)
+            sprintf(errorBuffer,"Unknown command argument: '%s'\n",path1Token);
+            return errorBuffer;
+        }
+    }   
+    else//path is optional/required
+    {
+        if(COMMAND_DB[commandPos].path1Requirements[0] == 'T' && *p1 == NULL)//path required and not given
+        {
+            sprintf(errorBuffer,"(1) Argument missing (PATH)\n");
+            return errorBuffer;
+        }
+        generateAbsolutePath(path1Token,cwd,*p1);
+        //this is for existing paths, we will have another part where we will handle
+        char pathRequiredStatus = COMMAND_DB[commandPos].path1Requirements[2];
+        if(pathRequiredStatus == 'E')
+        {
+            switch (pathAccessable(*p1))
             {
-                sprintf(errorBuffer,"Unknown command argument: '%s'\n",path1Token);
-                return errorBuffer;
+                case 'F'://path doesn't exists
+                    sprintf(errorBuffer,"The given path: '%s' doesn't exist on this device\n",path1Token);
+                    return errorBuffer;
+                case 'P'://path exists but innecasible(insufficient perms)
+                    sprintf(errorBuffer,"Insufficient permissions for the given path: ''\n");
+                    return errorBuffer;
+                case 'T'://path accessable!
+                    char pathType = determinePathType(*p1);
+                    char pathTypeRequired = COMMAND_DB[commandPos].path1Requirements[1];
+                    if(pathTypeRequired != pathType)
+                    {   
+                        sprintf(errorBuffer,"Wrong path type given(%s instead of %s)\n",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
+                        return errorBuffer;
+                    }
             }
         }
-        else//path is optional/required
+        //a making of a new path -> returns 'N'
+        else 
         {
-            if(COMMAND_DB[commandPos].path1Requirements[0] == 'T' && !path1Token)//path required and not given
+            switch(pathCreatable(*p1))
             {
-                sprintf(errorBuffer,"(1) Argument missing (PATH)\n");
-                return errorBuffer;
-            }
-
-            //this is for existing paths, we will have another part where we will handle
-            char pathRequiredStatus = COMMAND_DB[commandPos].path1Requirements[2];
-            if(pathRequiredStatus == 'E')
-            {
-                switch (pathAccessable(path1Token))
-                {
-                    case 'F'://path doesn't exists
-                        sprintf(errorBuffer,"The given path: '%s' doesn't exist on this device\n",path1Token);
-                        return errorBuffer;
-                    case 'P'://path exists but innecasible(insufficient perms)
-                        sprintf(errorBuffer,"Insufficient permissions for the given path: ''\n");
-                    case 'T'://path accessable!
-                        char pathType = determinePathType(path1Token);
-                        char pathTypeRequired = COMMAND_DB[commandPos].path1Requirements[1];
-                        if(pathTypeRequired != pathType)
-                        {   
-                            sprintf(errorBuffer,"Wrong path type given(%s instead of %s)\n",pathType == 'D' ? "Directory" : "File",pathTypeRequired == 'D' ? "Directory" : "File");
-                            return errorBuffer;
-                        }
-                        return NULL;
-                }
-            }
-            //a making of a new path -> returns 'N'
-            else 
-            {
-                switch(pathCreatable(fullPath1))
-                {
-                    case 'F':
-                        sprintf(errorBuffer,"failed to create the new %s, incorrect Directory\n",path1Requirements[1] == 'D' ? "Directroy" : "File");
-                        return errorBuffer;
-                    case 'P':
-                        sprintf(errorBuffer,"insufficient permissions to access the directory\n");
-                        return errorBuffer;
-                    case 'T':
-                        //success
-                        return NULL;
-                }
+                case 'F':
+                    sprintf(errorBuffer,"failed to create the new %s, incorrect Directory\n",path1Requirements[1] == 'D' ? "Directroy" : "File");
+                    return errorBuffer;
+                case 'P':
+                    sprintf(errorBuffer,"insufficient permissions to access the directory\n");
+                    return errorBuffer;
             }
         }
     }
+    
     //if we passed all the tests.. we load all the info up to the command block args:
-    memcpy(fN,nameToken,strlen(nameToken));
-    memcpy(args,argsToken,sizeof(uint64_t));
-    memcpy(p1,path1Token,strlen(path1Token));
-    memcpy(p2,path2Token,strlen(path2Token));
+    *fN = nameToken;
+    uint64_t argsResult = loadArgsToken(argsToken);
+    *args = argsResult;
     return NULL;
 
 }
 
 
 
-//the function will take modify the token of args and make it so it turns to a string of offsetted bits corresponding to their position in the A-z spot
-//for example the flag B will be at offset 1 
-
-//example:
-//input : ABD
-//output: ...000001011
-uint64_t loadArgsToken(char* token)
-{
-    uint64_t argsToken = 0;//make it ...00000000 first
-    for(int i = 0; i < strlen(token); i++)
-    {
-        bool isLowerCase = token[i] >= 'a' && token[i] <= 'z';
-        
-        int offset = token[i] - 'A';//calc offset by the distance from the first letter of the two alphabets(uppercase --> lowercase)
-        if(isLowerCase) offset -= DISTANCE_BETWEEN_ASCII_LOWER_UPPER;//if the letter is lowercase , we gotta decrement the distance between the two alphabets
-        argsToken |= 1U << offset;
-    }
-    return argsToken;
-}
 
 //this function takes an input that will look like this:
 //<command>  -<flags> <path> (each property can be null besides the command name block)
@@ -555,15 +523,17 @@ uint64_t loadArgsToken(char* token)
 ShellCommand* parse_input(char* inputBuffer,char* cwd)
 {
     char* nameToken = NULL; 
-    uint64_t* argsToken = 0;
-    char path1Token[256] = {0};
-    char path2Token[256] = {0};
+    uint64_t argsToken = 0;
+    char* path1Token = miron_malloc(256);
+    char* path2Token = miron_malloc(256);
 
     if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
-    char* output = checkInputErrors(inputBuffer,cwd,nameToken,argsToken,path1Token,path2Token);
+    char* output = checkInputErrors(inputBuffer,cwd,&nameToken,&argsToken,&path1Token,&path2Token);
     if(output)
     {
         printf("%s",output);
+        freeMemBlock(path1Token);
+        freeMemBlock(path2Token);
         return NULL;
     }
 
@@ -577,8 +547,8 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     if(nameToken != NULL)
     {
         parsedCommand->commandName = dataStart;
-        memcpy(dataStart, nameToken, strlen(nameToken));
-        dataStart += strlen(nameToken);
+        memcpy(dataStart, nameToken, strlen(nameToken) + 1);//same heree brotein shake
+        dataStart += strlen(nameToken) + 1;
     }
     else parsedCommand->commandName = NULL;
 
@@ -586,25 +556,30 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     {
         uint64_t* tempDataStart = (uint64_t*)dataStart;
         parsedCommand->args = tempDataStart;
-        memcpy(dataStart, argsToken,sizeof(uint64_t));
+        *tempDataStart = argsToken;
         dataStart += sizeof(uint64_t);
+        *dataStart = '\0';
+        dataStart += 1; 
     }
     else parsedCommand->args = NULL;
 
     if(strlen(path1Token) != 0)
     {
         parsedCommand->path1 = dataStart;
-        memcpy(dataStart, path1Token, strlen(path1Token));
+        memcpy(dataStart, path1Token, strlen(path1Token) + 1);//+1 to capture the null terminator
+        dataStart += strlen(path1Token) + 1;
     }
     else parsedCommand->path1 = NULL;
 
     if(strlen(path2Token) != 0)
     {
         parsedCommand->path2 = dataStart;
-        memcpy(dataStart, path2Token, strlen(path2Token));
+        memcpy(dataStart, path2Token, strlen(path2Token) + 1);//same here
+        dataStart += strlen(path1Token) + 1;
     }
     else parsedCommand->path2 = NULL;
-
+    freeMemBlock(path1Token);
+    freeMemBlock(path2Token);
     return parsedCommand;
 }
 
@@ -631,10 +606,30 @@ void printLinkTarget(const char* linkPath) {
 /*
 when we start to check each and every file and if its a dir we call the function again but we modify the scanned dir to be the sub-dir and return once it gets to the end
 */
+//function for showing nice file size(until TB only)
+const char* formatSize(uint64_t bytes) {
+    static char buffer[32];
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int i = 0;
+    double size = (double)bytes;
 
+    while (size >= 1024 && i < 4) {
+        size /= 1024;
+        i++;
+    }
+
+    // If it's just bytes, don't show decimals. Otherwise, show 2 decimal places.
+    if (i == 0) {
+        snprintf(buffer, sizeof(buffer), "%llu %s", bytes, units[i]);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%.2f %s", size, units[i]);
+    }
+
+    return buffer;
+}
 
 //NOTE: for simplicity and testing, the first lsRecursive version WILL be without any checking of other command flags(only -R)
-void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
+void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
 {
     WIN32_FIND_DATA findData;
     ZeroMemory(&findData, sizeof(WIN32_FIND_DATA)); // The Windows way to memset
@@ -648,6 +643,7 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
             printf("permission denied : '%s'\n",search_path);
         }
         // else if (error == ERROR_FILE_NOT_FOUND) --> this is how to check if a file is empty
+        FindClose(hFind);
         return;
     }
     //cycle through the folder, the moment we find another folder - we cycling through it through an additional function call
@@ -657,8 +653,8 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
     char sortType = '\0';//we will collectievly check all of the sort-related flags, and the farest one in the alphabet will get chosen(ASCII)
     bool sortBySize = arg_exists(currCommand->args,'S');//sort by size, biggest first unless reversed
     bool sortByTimeStamp = arg_exists(currCommand->args,'t');//recent first if not reversed
-    if(sortBySize) sortType = 't';
-    if(sortBySize) sortType = 'S';
+    if(sortBySize) sortType = 't'; 
+    if(sortBySize) sortType = 'S'; 
     bool reverseSort = arg_exists(currCommand->args,'r');//reverse the sorting if this flag is set
 
     int childCount = 0;
@@ -752,6 +748,7 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
             }
         }
     }
+    bool isRecursive = arg_exists(currCommand->args,'R');
     bool showMoreFileInfo = arg_exists(currCommand->args,'l');
     for(int i = 0; i < childCount; i++)
     {
@@ -764,36 +761,65 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
         DWORD attrs = sortedFileArray[i]->dwFileAttributes;
         if(showMoreFileInfo)
         {   
-            if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
-            if(showAlmostAll || showAll) printf("  %s ",attrs & FILE_ATTRIBUTE_HIDDEN ? "(hidden)" : "");
+            printf("  ---  ");
+            
+            // 1. Permissions / Type String
+            char type = (attrs & FILE_ATTRIBUTE_DIRECTORY) ? 'd' : '-';
+            if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) type = 'l'; // Symbolic link
+            
+            char* name = sortedFileArray[i]->cFileName;
+            char exec = (strstr(name,".exe") || strstr(name,".bat") || strstr(name,".cmd")) ? 'x' : '-';
+            char* readWrite = (attrs & FILE_ATTRIBUTE_READONLY) ? "r-" : "rw";
+            
+            printf("%c%s%c ", type, readWrite, exec);
+
+            // 2. File Size (Combining High and Low DWORDs)
+            uint64_t fileSize = ((uint64_t)sortedFileArray[i]->nFileSizeHigh << 32) | sortedFileArray[i]->nFileSizeLow;
+            
+            // If it's a directory, typical 'ls' behavior is to show 0 or a block size
+            if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
+                printf("%10s ", "<DIR>");
+            } else {
+                // Use our new human-readable formatter
+                printf("%10s ", formatSize(fileSize));
+            }
+
+            // 3. Modification Time
+            SYSTEMTIME stUTC, stLocal;
+            FileTimeToSystemTime(&sortedFileArray[i]->ftLastWriteTime, &stUTC);
+            SystemTimeToTzSpecificLocalTime(NULL, &stUTC, &stLocal); // Convert to your local time
+
+            printf(" %02d/%02d/%d %02d:%02d ", 
+                stLocal.wDay, stLocal.wMonth, stLocal.wYear, 
+                stLocal.wHour, stLocal.wMinute);
+
             if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
             {
-                printf("l");
                 printLinkTarget(sortedFileArray[i]->cFileName);
             }
-            char x = '-';
-            char* name = sortedFileArray[i]->cFileName;
-            if(strstr(name,".exe") || strstr(name,".bat") || strstr(name,".cmd")) x = 'x';
-            printf("%c",attrs & FILE_ATTRIBUTE_DIRECTORY ? 'd' : '-');
-            printf("%s%c",attrs & FILE_ATTRIBUTE_READONLY ? "r-" : "rw",x);
             
-            
+            printf(" --- ");
         }
         printf("\n");
-        if(!isNavigationDot)//of course we will print . / .. but not explore it
+        //recursion:
+        if(isRecursive)
         {
-            if(sortedFileArray[i]->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
-            {//tatoo the current folder to our search_path
-                int tempLen = strlen(search_path) + strlen(sortedFileArray[i]->cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
-                char temp[tempLen];
-                strcpy(temp,search_path);
-                temp[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
-                //cut the last * before moving to the next dir to avoid something like this: D:/Games/*/*/*/*, we dont want that right gentlemen?
-                //add the new additional dir --> prev/curr/*
-                strcat(temp,"/");
-                strcat(temp,sortedFileArray[i]->cFileName);
-                strcat(temp,"/*");
-                lsRecursive(currCommand,cwd,temp,offset + 1);
+            if(!isNavigationDot)//of course we will print . / .. but not explore it
+            {
+                if(sortedFileArray[i]->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)//true if its a directory:
+                {//tatoo the current folder to our search_path
+                    int tempLen = strlen(search_path) + strlen(sortedFileArray[i]->cFileName) + 3;// + 1 for the null terminator and + 2 for the  new additional '/*'
+                    char temp[tempLen];
+                    memset(temp,0,tempLen);
+                    strcpy(temp,search_path);
+                    temp[strlen(search_path) - 1] = '\0';//remove / null terminate the last *
+                    //cut the last * before moving to the next dir to avoid something like this: D:/Games/*/*/*/*, we dont want that right gentlemen?
+                    //add the new additional dir --> prev/curr/*
+                    // strcat(temp,"/");
+                    strcat(temp,sortedFileArray[i]->cFileName);
+                    strcat(temp,"/*");
+                    ls_wrapped(currCommand,cwd,temp,offset + 1);
+                }
             }
         }
     } 
@@ -803,33 +829,11 @@ void lsRecursive(ShellCommand* currCommand,char* cwd,char* search_path,int offse
     return;
 }
 
-void lsRecursiveWrapper(ShellCommand* currCommand,char* cwd)//Wrapper function
-{
-    char search_path[256];
-    snprintf(search_path, 256, "%s/*",currCommand->path1);
-    int offset = 0;
-    lsRecursive(currCommand,cwd,search_path,offset);//the fourth arg for the function is the offset
-    //the offset will be incremented from each level of recursive searching,so in the highest folder it'll be 0, and in the next inner one itll be 1 so it will look like this example:
-    /*
-    folder
-        folder 2
-        file 1
-        folder 3
-            folder 4
-            file 2
-            file 3
-        folder 5
-    */
-}
-
-
-
-
 void lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
 {
-    char search_path[256];
+    char search_path[2400];
     //add a /* filter to basically tell the findData of windows.h to take everything that is inside that directory
-    snprintf(search_path, 256, "%s/*",currCommand->path1); 
+    snprintf(search_path, 2400, "%s/*",currCommand->path1); 
 
     WIN32_FIND_DATA findData;
 
@@ -838,7 +842,7 @@ void lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
     //itirate through the dir until we find the border
     do
     {
-        if(findData.cFileName[0] == '.' || findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN && !arg_exists(currCommand->args,'a')) continue; //skip .. and . dirs if there is no -a flag
+        if(findData.cFileName[0] == '.' || findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue; //skip .. and . dirs if there is no -a flag
         printf("%s \n",findData.cFileName);
         
     }while(FindNextFile(hFind, &findData ) != 0 );
@@ -853,36 +857,29 @@ bool ls(ShellCommand* currCommand,char* cwd)
         lsNoArgs(currCommand,cwd);
         return true;
     }
-    bool isRecursive = arg_exists(args,'R');//check if the bit on the offset for recursiveness is on
-    bool showAll = arg_exists(args,'a');
-    bool showAlmostAll = arg_exists(args,'A');
-    if(isRecursive)//here we will have to jump to a whole different sub-function since the scanning of files here is entierly different:
-    {
-        lsRecursiveWrapper(currCommand,cwd);
-    }
 
-    //flags that tells how to print out the file info
-    // bool l = strchr(currCommand->args,'l') != NULL;//uses a long listing format, show perms, num of links, owner, group, size in bytes, and the last time of modification
-    // bool h = strchr(currCommand->args,'h') != NULL;//human readable --> displayes file sizes in human-readable formats like K/M/G
-
-    //flags that relate to what files to show and what not to:
-    // bool a = strchr(currCommand->args,'a') != NULL;//Lists all files including hidden and .. / .
-    // bool A = strchr(currCommand->args,'A') != NULL;//lists everything except .. / .
-
-    //flag that tells how to search through the files (Recursive or not)
-    // bool R = strchr(currCommand->args,'R') != NULL;//recursively list contents of all subdirs
-
-    //flags that tell how to sort the order of files showing
-    // bool t = strchr(currCommand->args,'t') != NULL;//sort the list by modification time(recent first)
-    // bool r = strchr(currCommand->args,'r') != NULL;//reverse the sorting order
-    // bool S = strchr(currCommand->args,'S') != NULL;//sort list by size
+    char search_path[2400];
+    snprintf(search_path, 2400, "%s/*",currCommand->path1);
+    int offset = 0;
+    ls_wrapped(currCommand,cwd,search_path,offset);
 
 }
 
+//in the cd, we will reallocate the amount of bytes needed to hold the new cwd and switch the main's pointer to it(and get rid of the old one)
+void cd(ShellCommand* currCommand,char** cwd)
+{
+    int newLen = strlen(currCommand->path1);//check how much we need to allocate for the new cwd
+    char* newCWDPtr = (char*)miron_malloc(newLen + 1);//allocated it( +1 for null terminator)
+    strcpy(newCWDPtr,currCommand->path1);//copy the contents to the new pointer
+    freeMemBlock(*cwd);//free the old pointer
+    *cwd = newCWDPtr;//new pointerr
+}
 
 int main()
 {
-    char cwd[] = "D:";//first default cwd, in the future will be modifiable
+    char first_cwd_text[] = "D:";//first default cwd, in the future will be modifiable
+    char* cwd = miron_malloc(strlen(first_cwd_text) + 1);
+    strcpy(cwd,first_cwd_text);
     char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
     {
@@ -900,92 +897,14 @@ int main()
         }
         // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
         if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//lsRecursive basic test
+        if(strcmp(currCommand->commandName,"cd") == 0) cd(currCommand,&cwd);
 
 
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
         freeMemBlock(currCommand);
     }
-    // char* chars = miron_malloc(4);
-    // fgets(chars, sizeof(chars),stdin);
-    // chars[strcspn(chars,"\n")] = 0;
-    // uint64_t n = loadArgsToken(chars);
-    // print_binary64(n);
-
-    
-
-
-    // while(1)
-    // {
-    //     printf("\n%s>",cwd);
-
-    //     if (fgets(inputBuffer, sizeof(inputBuffer), stdin) == NULL) break;
-
-    //     // 3. Remove the annoying newline '\n' at the end
-    //     inputBuffer[strcspn(inputBuffer, "\n")] = 0;
-    
-    //     if (strcmp(inputBuffer, "exit") == 0) {
-    //         break;
-    //     }
-    //     printf("%s",checkInputErrors(inputBuffer,cwd));
-    // }
-
-
-    // // 1. Define the raw text
-    // char* sourceText = "ls -alo C:/MironComputer/Documents";
-    
-    // // 2. Allocate space on YOUR heap (+1 for the null terminator!)
-    // // We use strlen(sourceText) + 1 to ensure it's a valid C-string
-    // char* heapInput = (char*)miron_malloc(strlen(sourceText) + 1);
-    
-    // // 3. Copy the literal into your writable heap block
-    // strcpy(heapInput, sourceText);
-
-    // // 4. Now parse it (strtok will now succeed because heapInput is writable)
-    // ShellCommand* cmd = parse_input(heapInput);
-
-    // if (cmd) {
-    //     printf("command name : %s\n", cmd->commandName);
-    //     printf("args         : %s\n", cmd->args ? cmd->args : "NONE");
-    //     // printf("file path    : %s\n", cmd->filePath ? cmd->filePath : "NONE");
-        
-    //     // Since you "packed" the struct into one block, this one call 
-    //     // cleans up the struct AND the strings.
-    //     freeMemBlock((void*)(cmd)); 
-    // }
-
-    // // Don't forget to free the input buffer itself if you're done with it!
-    // freeMemBlock((void*)(heapInput));
-
-
-
-    // // Simulated Current Working Directory
-    // char cwd[] = "C:/Users/Miron/Projects";
-    
-    // // Test 1: Complex Relative Path
-    // char input1[] = "../Documents/./Secret/../Notes";
-    // // Expected: "C:/Users/Miron/Notes"
-
-    // // Test 2: Implicit Relative Path (no dots)
-    // char input2[] = "Downloads/Pictures";
-    // // Expected: "C:/Users/Miron/Projects/Downloads/Pictures"
-
-    // // Test 3: Absolute Path (should ignore CWD)
-    // char input3[] = "D:/Games/Minecraft";
-    // // Expected: "D:/Games/Minecraft"
-
-    // // Test 4: Root Guard (trying to go above C:/)
-    // char input4[] = "../../../../../..";
-    // // Expected: "C:/" (or NULL depending on your choice)
-
-    // // Example call (assuming you handle the return string allocation)
-    // printf("CWD: %s\n", cwd);
-    // printf("Input: %s\n", input2);
-    
-    // char* result = miron_malloc(256);
-    // returnAbsolutePath(input2, cwd,result);
-    
-    
-    // printf("Resolved: %s\n", result);
+    freeMemBlock(inputBuffer);
+    freeMemBlock(cwd);
 
     return 0;
 }
