@@ -38,7 +38,8 @@ static const CommandRule COMMAND_DB[] = {
     {"ls", "aAlhRrtS","ODE","FFE"},
     {"cd", "","TDE","FFE"},
     {"mkdir", "p","TDN","FFN"},
-    {"exit", "","FFE","FFE"}
+    {"exe","","TDE"},
+    {"exit", "","FFE","FFE"},
 };
 
 #define DB_SIZE (sizeof(COMMAND_DB) / sizeof(CommandRule))
@@ -301,6 +302,43 @@ uint64_t loadArgsToken(char* token)
 }
 
 
+void translateENVars(char* destinationPath, char* userPath) 
+{
+    char* src = userPath;
+    char* dst = destinationPath;
+    while(*src)
+    {
+        if(*src == '%')
+        {
+            char* secondPercent = strchr(src + 1,'%');
+            if(secondPercent)//found it
+            {
+                size_t lenOfKey = secondPercent - (src + 1);//+1 since the src points to the first %
+                char key[lenOfKey];
+                //copy everything to the key:
+                strncpy(key,src + 1,lenOfKey);
+                key[lenOfKey] = '\0';//null terminate jsut in case
+                char value[4096];//we can do a big value doesnt matter
+                printf("[%s]",key);
+                DWORD res = GetEnvironmentVariableA(key, value, 4096);
+                if(res > 0)//success
+                {
+                    char* vPtr = value;
+                    while(*vPtr)
+                    {
+                        *dst++ = *vPtr++;//load the value
+                    }
+                    src = secondPercent + 1;//move the src pointer past ts
+                    continue;
+                }
+            }
+        }
+        *dst++ = *src++;
+    }
+    *dst = '\0';//dont forget to null terminate
+}
+
+
 // NOTE: WE HAVE TO MODIFY PATH1TOKEN AND PATH2TOKEN WITH the returnAbsolutePath that will take any user input and interpert it (will work only if the complete path is valid)
 char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* args,char** p1,char** p2)
 {
@@ -468,7 +506,10 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
             sprintf(errorBuffer,"(1) Argument missing (PATH)\n");
             return errorBuffer;
         }
-        generateAbsolutePath(path1Token,cwd,*p1);
+        char tempPath1[256] = {0};
+        char* vPtr = tempPath1;
+        translateENVars(vPtr,path1Token);
+        generateAbsolutePath(vPtr,cwd,*p1);
         //this is for existing paths, we will have another part where we will handle
         char pathRequiredStatus = COMMAND_DB[commandPos].path1Requirements[2];
         if(pathRequiredStatus == 'E')
@@ -875,10 +916,45 @@ void cd(ShellCommand* currCommand,char** cwd)
     *cwd = newCWDPtr;//new pointerr
 }
 
+void exe(ShellCommand* currCommand)
+{
+    STARTUPINFO si;
+    PROCESS_INFORMATION pi;
+
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    ZeroMemory(&pi, sizeof(pi));
+
+    if(!CreateProcessA(
+        NULL,
+        currCommand->path1,
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        NULL,
+        &si,
+        &pi
+    ))
+    {
+        printf("Process Creation Failed (%d).\n",GetLastError());
+        return;
+    }
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    printf("\nProcess finished. Returning to shell...\n");
+}
+
+
 int main()
 {
     char first_cwd_text[] = "D:";//first default cwd, in the future will be modifiable
-    char* cwd = miron_malloc(strlen(first_cwd_text) + 1);
+    char* cwd = miron_malloc(strlen(first_cwd_text) + 1);//+1 for null terminator
     strcpy(cwd,first_cwd_text);
     char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
@@ -896,8 +972,9 @@ int main()
             break;
         }
         // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
-        if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//lsRecursive basic test
-        if(strcmp(currCommand->commandName,"cd") == 0) cd(currCommand,&cwd);
+        if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//ls command
+        if(strcmp(currCommand->commandName,"cd") == 0) cd(currCommand,&cwd);//cd command
+        if(strcmp(currCommand->commandName,"exe") == 0) exe(currCommand);//exe command
 
 
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
