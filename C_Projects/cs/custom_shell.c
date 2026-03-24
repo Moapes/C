@@ -43,11 +43,11 @@ typedef struct CommandRule{
 } CommandRule;
 
 
-typedef struct CommandChain{
-    CommandRule* chain;
-}CommandChain;
+// typedef struct CommandChain{
+//     ShellCommand* chain;
+// }CommandChain;
 
-static const CommandRule COMMAND_DB[] = {
+const CommandRule COMMAND_DB[] = {
     {"ls", "aAlhRrtS","ODE","FFE"},
     {"cd", "","TDE","FFE"},
     {"mkdir", "p","TDN","FFN"},
@@ -64,7 +64,27 @@ static const CommandRule COMMAND_DB[] = {
 
 #define MIN_CHILDREN_COUNT 16
 
+//function for showing nice file size(until TB only)
+const char* formatSize(uint64_t bytes) {
+    static char buffer[32];
+    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+    int i = 0;
+    double size = (double)bytes;
 
+    while (size >= 1024 && i < 4) {
+        size /= 1024;
+        i++;
+    }
+
+    // If it's just bytes, don't show decimals. Otherwise, show 2 decimal places.
+    if (i == 0) {
+        snprintf(buffer, sizeof(buffer), "%llu %s", bytes, units[i]);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%.2f %s", size, units[i]);
+    }
+
+    return buffer;
+}
 
 void print_binary64(uint64_t n) {
     // We iterate from the most significant bit (63) down to 0
@@ -521,8 +541,9 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
         }
         char tempPath1[256] = {0};
         char* vPtr = tempPath1;
-        translateENVars(vPtr,path1Token);
-        generateAbsolutePath(vPtr,cwd,*p1);
+        generateAbsolutePath(path1Token,cwd,*p1);
+        translateENVars(vPtr,*p1);
+
         //this is for existing paths, we will have another part where we will handle
         char pathRequiredStatus = COMMAND_DB[commandPos].path1Requirements[2];
         if(pathRequiredStatus == 'E')
@@ -640,10 +661,10 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
 
 
-CommandChain* craftCommandChain(char* inputBuffer,char* cwd)
-{
-    //the idea is that we will
-}
+// CommandChain* craftCommandChain(char* inputBuffer,char* cwd)
+// {
+//     //the idea is that we will
+// }
 
 
 int main()
@@ -674,6 +695,7 @@ int main()
 
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
         freeMemBlock(currCommand);
+        rewind(stdin);
     }
     freeMemBlock(inputBuffer);
     freeMemBlock(cwd);

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <windows.h>
+#include "../cma/custom_memory_allocator.h"
 
 /* --- Constants & Macros --- */
 #define MAX_INPUT_SIZE 200
@@ -42,6 +43,7 @@ extern const size_t DB_SIZE;
 void print_binary64(uint64_t n);
 bool arg_exists(uint64_t* offsetString, char c);
 uint64_t loadArgsToken(char* token);
+const char* formatSize(uint64_t bytes);
 
 // Path & Filesystem Analysis
 int sumOfDirParts(char* dir);
