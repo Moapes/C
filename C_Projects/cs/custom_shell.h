@@ -1,10 +1,18 @@
 #ifndef SHELL_H
 #define SHELL_H
 
+//regular libs
 #include <stdint.h>
 #include <stdbool.h>
 #include <windows.h>
+
+//load cma
 #include "../cma/custom_memory_allocator.h"
+
+//load commands headers
+#include "command-cd.h"
+#include "command-exe.h"
+#include "command-ls.h"
 
 /* --- Constants & Macros --- */
 #define MAX_INPUT_SIZE 200

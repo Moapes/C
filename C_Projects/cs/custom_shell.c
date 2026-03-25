@@ -22,16 +22,16 @@
 
 #include "../cma/custom_memory_allocator.h"
 
-//load command headers:
-#include "./command-cd.h"
-#include "./command-ls.h"
-#include "./command-exe.h"
 
 typedef struct ShellCommand{
     char* commandName;
     uint64_t* args;
     char* path1;
     char* path2;
+    //handles for piping logic
+    HANDLE hIn;
+    HANDLE hOut;
+    ShellCommand* nextCommand;//to create a chain-like (a linked list) system
 }ShellCommand;
 
 
@@ -42,10 +42,6 @@ typedef struct CommandRule{
     const char* path2Requirements;//same with pathRequired
 } CommandRule;
 
-
-// typedef struct CommandChain{
-//     ShellCommand* chain;
-// }CommandChain;
 
 const CommandRule COMMAND_DB[] = {
     {"ls", "aAlhRrtS","ODE","FFE"},
@@ -386,11 +382,55 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
     int start = 0;
     int end = 0;
 
+    //NOTE: for a correct file redirection, rules must be followed:
+    /*
+    1.only a single " " thingy
+    2.it must be an accessable file
+    */
+
     static char errorBuffer[256];
     char* currPtr = targetInputBuffer;//copy a pointer to the start to use it for advancing on the inputBuffer
 
+
     // --- 1. Get COMMAND NAME ---
     start = strspn(currPtr, " "); 
+    //first check if its a redirection of a file scenario
+    if(&targetInputBuffer[start] == '"')
+    {
+        char* startOfFileName = &targetInputBuffer[start+1];
+        if(startOfFileName != NULL)
+        {
+            char* fileNameEnd = strpbrk(startOfFileName,'"');
+            if(fileNameEnd == NULL)
+            {
+                sprintf(errorBuffer, "Syntax Error: Missing closing quote at supposed filename\n");
+                return errorBuffer;
+            }
+            fileNameEnd = '\0';//null terminate the qoute to establish bounadry
+            DWORD dwAttrib = GetFileAttributes(startOfFileName);
+            if(dwAttrib != INVALID_FILE_ATTRIBUTES)//actual dir
+            {
+                if(dwAttrib & FILE_ATTRIBUTE_DIRECTORY)//Its a folder(bad)
+                {
+                    sprintf(errorBuffer, "Logical Error: can't redirect folders / links\n");
+                    return errorBuffer;
+                }
+                //a file we found it less go
+                //last check, we gotta see that there is nothing outside the qoutation:
+                if(strpbrk(fileNameEnd + 1," ") != NULL)//looks sum like this: "D:/Games/Game1.exe" -PP
+                {
+                    sprintf(errorBuffer,"Syntax Error: invalid output redirection args\n");
+                    return errorBuffer;
+                }
+            }
+        }
+        
+    }
+
+
+
+
+
     // Use strcspn to find the first SPACE (the end of the word)
     end = start + strcspn(currPtr + start, " "); 
     nameToken = &targetInputBuffer[start];
@@ -599,25 +639,26 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 {
     char* nameToken = NULL; 
     uint64_t argsToken = 0;
-    char* path1Token = miron_malloc(256);
-    char* path2Token = miron_malloc(256);
+    char* path1Token = malloc(256);
+    char* path2Token = malloc(256);
 
     if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
     char* output = checkInputErrors(inputBuffer,cwd,&nameToken,&argsToken,&path1Token,&path2Token);
     if(output)
     {
         printf("%s",output);
-        freeMemBlock(path1Token);
-        freeMemBlock(path2Token);
+        free(path1Token);
+        free(path2Token);
         return NULL;
     }
 
     //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
-    size_t totalSize = strlen(nameToken) + sizeof(uint64_t) + strlen(path1Token) + strlen(path2Token);
+    size_t userInputSize = strlen(nameToken) + sizeof(uint64_t) + strlen(path1Token) + strlen(path2Token);
+    size_t additionalSize = sizeof(ShellCommand) + (sizeof(HANDLE) * 2) + sizeof(ShellCommand*);//for the struct itself, the handles of in and out, and the pointer to the next command in the linked list
+    size_t totalSize = userInputSize + additionalSize;
+    ShellCommand* parsedCommand = malloc(totalSize);//handles and pointer to the next command update. yay
 
-    ShellCommand* parsedCommand = miron_malloc(sizeof(ShellCommand) + totalSize);
-
-    char* dataStart = (char*)(parsedCommand + 1);
+    char* dataStart = (char*)(parsedCommand + additionalSize);//we will enter the nextCommand arg, + the two HANDLES after this functions so we gotta make sure the caller can insert it from the starting pointer
 
     if(nameToken != NULL)
     {
@@ -653,26 +694,159 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
         dataStart += strlen(path1Token) + 1;
     }
     else parsedCommand->path2 = NULL;
-    freeMemBlock(path1Token);
-    freeMemBlock(path2Token);
+    free(path1Token);
+    free(path2Token);
     return parsedCommand;
 }
 
+void freeChainedCommands(ShellCommand* firstCommand)
+{
+    if(firstCommand == NULL) return;
+    freeChainedCommands(firstCommand->nextCommand);
+    free(firstCommand);
+}
 
+void chainCommands(char* inputBuffer,char* cwd)
+{
 
+    if(inputBuffer = NULL) return;
+    char* currPtr = inputBuffer;
+    char* singularCommandPtr = inputBuffer;//not null so while cant null my shit the first second
+    char* nextCommandPtr = inputBuffer;//just put it like that so we can add it to the while condition
+    bool flow = true;//if a piping or a redirection creation failed it'll become false and make the loop stop(we cant just return since we have to free all the parsed commmands)
+    int c = 0;
+    ShellCommand* firstCommand;
 
-// CommandChain* craftCommandChain(char* inputBuffer,char* cwd)
-// {
-//     //the idea is that we will
-// }
+    while(singularCommandPtr != NULL || nextCommandPtr != NULL && flow)
+    {
+        char* singularCommandPtr = strpbrk(currPtr,"<>|");
+        char devider1 = *singularCommandPtr;
+        int next = (int)(&singularCommandPtr - &inputBuffer) + 1;
+        *singularCommandPtr = '\0';
+        ShellCommand* currCommand = parse_input(currPtr,cwd);
+        if(c == 0) firstCommand = currCommand;
 
+        currPtr += next;
+        //update to the next iteration(if it exists)
+        if(currCommand != NULL)
+        {
+            nextCommandPtr = strpbrk(currPtr,"<>|");
+            if(nextCommandPtr != NULL)
+            {
+                char devider2 = *nextCommandPtr;
+                next = (int)(&singularCommandPtr - &inputBuffer) + 1;//to advance currPtr after this iteration
+                *nextCommandPtr = '\0';//temporarily to work with it.. we will put devider2 back once we're done with it
+                ShellCommand* nextCommand = parse_input(currPtr,cwd);
+
+                currCommand->nextCommand = nextCommand;//assign this bad boy here
+                switch (devider1)
+                {
+                    case '|':
+                        HANDLE hRead, hWrite;
+                        SECURITY_ATTRIBUTES sa;
+
+                        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+                        sa.bInheritHandle = TRUE;    // CRITICAL: Allows the child process to "see" the handle
+                        sa.lpSecurityDescriptor = NULL;
+
+                        if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
+                            printf("piping creation failed..\n");
+                            flow = false;
+                        }
+                        currCommand->hOut = hWrite;
+                        nextCommand->hIn = hRead;
+
+                        break;
+                    case '>': 
+                        // 1. Setup Security (Same as you did for Pipe)
+                        SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE }; 
+
+                        // 2. Open/Create the file
+                        // nextCommand->args[0] is the filename (e.g., "out.txt")
+                        HANDLE hFile = CreateFile(
+                            nextCommand->commandName,// Filename
+                            GENERIC_WRITE,            // We want to write to it
+                            FILE_SHARE_READ,          // Let others read it while we work
+                            &sa,                      // Inheritance MUST be TRUE
+                            CREATE_ALWAYS,            // Overwrite if exists, create if not
+                            FILE_ATTRIBUTE_NORMAL,
+                            NULL
+                        );
+
+                        if (hFile == INVALID_HANDLE_VALUE) {
+                            printf("Error: Could not open file for redirection.\n");
+                            flow = false;
+                        } else currCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                        break;
+                
+
+                    case '<':
+                        // 1. Setup Security (Same as you did for Pipe)
+                        SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE }; 
+
+                        // 2. Open/Create the file
+                        // nextCommand->args[0] is the filename (e.g., "out.txt")
+                        HANDLE hFile = CreateFile(
+                            currCommand->commandName,// Filename
+                            GENERIC_WRITE,            // We want to write to it
+                            FILE_SHARE_READ,          // Let others read it while we work
+                            &sa,                      // Inheritance MUST be TRUE
+                            CREATE_ALWAYS,            // Overwrite if exists, create if not
+                            FILE_ATTRIBUTE_NORMAL,
+                            NULL
+                        );
+
+                        if (hFile == INVALID_HANDLE_VALUE) {
+                            printf("Error: Could not open file for redirection.\n");
+                            flow = false;
+                        } else nextCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                        break;
+                
+                }
+                
+                currPtr += next;
+                *nextCommandPtr = devider2;
+                continue;
+            }
+
+        }
+        c++;
+        
+    }
+
+    ShellCommand* temp = firstCommand;
+    int i = 0;
+
+    printf("\n--- DEBUG: Command Chain ---\n");
+
+    while (temp != NULL) {
+        printf("[%d] Command: %s\n", i++, temp->commandName);
+        
+        // Print the Handles
+        // If these are "00000000", they are NULL (Standard In/Out)
+        // If they have a value, your Redirection/Piping worked!
+        printf("    hIn:  %p (Keyboard or Pipe/File)\n", temp->hIn);
+        printf("    hOut: %p (Screen or Pipe/File)\n", temp->hOut);
+        
+        printf("----------------------------\n");
+
+        // Advance to the next node
+        temp = temp->nextCommand;
+    }
+
+    //free all the parsedCommands with a recursive function:
+    ShellCommand* temp2 = firstCommand;
+    freeChainedCommands(temp2);
+    
+
+}
 
 int main()
 {
     char first_cwd_text[] = "D:";//first default cwd, in the future will be modifiable
-    char* cwd = miron_malloc(strlen(first_cwd_text) + 1);//+1 for null terminator
+    char* cwd = malloc(strlen(first_cwd_text) + 1);//+1 for null terminator
     strcpy(cwd,first_cwd_text);
-    char* inputBuffer = (char*)miron_malloc(MAX_INPUT_SIZE);
+    char* inputBuffer = (char*)malloc(MAX_INPUT_SIZE);
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
     {
         printf("%s> ",cwd);
@@ -694,11 +868,11 @@ int main()
 
 
         memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
-        freeMemBlock(currCommand);
+        free(currCommand);
         rewind(stdin);
     }
-    freeMemBlock(inputBuffer);
-    freeMemBlock(cwd);
+    free(inputBuffer);
+    free(cwd);
 
     return 0;
 }
