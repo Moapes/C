@@ -1,32 +1,35 @@
 #ifndef SHELL_H
 #define SHELL_H
 
-//regular libs
+/* --- Standard Libraries --- */
 #include <stdint.h>
 #include <stdbool.h>
 #include <windows.h>
-
-//load cma
-#include "../cma/custom_memory_allocator.h"
-
-//load commands headers
-#include "command-cd.h"
-#include "command-exe.h"
-#include "command-ls.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* --- Constants & Macros --- */
 #define MAX_INPUT_SIZE 200
 #define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 6
-
 #define MIN_CHILDREN_COUNT 16
-/* --- Structures --- */
 
-typedef struct ShellCommand {
+/* --- Forward Declarations --- */
+// This tells the compiler "ShellCommand exists" so your other .h files 
+// and the struct itself can use pointers to it immediately.
+typedef struct ShellCommand ShellCommand;
+
+/* --- Structure Definitions --- */
+
+struct ShellCommand {
     char* commandName;
     uint64_t* args;
     char* path1;
     char* path2;
-} ShellCommand;
+    HANDLE hIn;
+    HANDLE hOut;
+    ShellCommand* nextCommand; // This now works because of the forward declaration
+};
 
 typedef struct CommandRule {
     const char* name;
@@ -40,8 +43,6 @@ typedef struct CommandChain {
 } CommandChain;
 
 /* --- Database External Declaration --- */
-// We use 'extern' so the actual data lives in your .c file 
-// but other files can see it exists.
 extern const CommandRule COMMAND_DB[];
 extern const size_t DB_SIZE;
 
@@ -66,6 +67,12 @@ char* checkInputErrors(char* targetInputBuffer, char* cwd, char** fN, uint64_t* 
 ShellCommand* parse_input(char* inputBuffer, char* cwd);
 CommandChain* craftCommandChain(char* inputBuffer, char* cwd);
 
-
+/* --- Sub-Module Includes --- */
+// We include these AFTER the structs are defined so they can 
+// use 'ShellCommand*' in their function prototypes.
+#include "../cma/custom_memory_allocator.h"
+#include "command-cd.h"
+#include "command-exe.h"
+#include "command-ls.h"
 
 #endif // SHELL_H

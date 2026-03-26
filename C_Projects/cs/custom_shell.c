@@ -395,18 +395,18 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
     // --- 1. Get COMMAND NAME ---
     start = strspn(currPtr, " "); 
     //first check if its a redirection of a file scenario
-    if(&targetInputBuffer[start] == '"')
+    if(targetInputBuffer[start] == '"')
     {
         char* startOfFileName = &targetInputBuffer[start+1];
         if(startOfFileName != NULL)
         {
-            char* fileNameEnd = strpbrk(startOfFileName,'"');
+            char* fileNameEnd = strpbrk(startOfFileName,"\"");
             if(fileNameEnd == NULL)
             {
                 sprintf(errorBuffer, "Syntax Error: Missing closing quote at supposed filename\n");
                 return errorBuffer;
             }
-            fileNameEnd = '\0';//null terminate the qoute to establish bounadry
+            *fileNameEnd = '\0';//null terminate the qoute to establish bounadry
             DWORD dwAttrib = GetFileAttributes(startOfFileName);
             if(dwAttrib != INVALID_FILE_ATTRIBUTES)//actual dir
             {
@@ -646,7 +646,7 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     char* output = checkInputErrors(inputBuffer,cwd,&nameToken,&argsToken,&path1Token,&path2Token);
     if(output)
     {
-        printf("%s",output);
+        printf("%s\n",output);
         free(path1Token);
         free(path2Token);
         return NULL;
@@ -702,142 +702,151 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 void freeChainedCommands(ShellCommand* firstCommand)
 {
     if(firstCommand == NULL) return;
+    if(IsBadReadPtr(firstCommand, 1) == 0) return;
     freeChainedCommands(firstCommand->nextCommand);
     free(firstCommand);
 }
 
 void chainCommands(char* inputBuffer,char* cwd)
 {
+    if (inputBuffer == NULL) return;
 
-    if(inputBuffer = NULL) return;
     char* currPtr = inputBuffer;
-    char* singularCommandPtr = inputBuffer;//not null so while cant null my shit the first second
-    char* nextCommandPtr = inputBuffer;//just put it like that so we can add it to the while condition
-    bool flow = true;//if a piping or a redirection creation failed it'll become false and make the loop stop(we cant just return since we have to free all the parsed commmands)
-    int c = 0;
-    ShellCommand* firstCommand;
+    ShellCommand* firstCommand = NULL;
+    ShellCommand* prevCommand = NULL;
+    ShellCommand* currCommand = NULL;
 
-    while(singularCommandPtr != NULL || nextCommandPtr != NULL && flow)
-    {
-        char* singularCommandPtr = strpbrk(currPtr,"<>|");
-        char devider1 = *singularCommandPtr;
-        int next = (int)(&singularCommandPtr - &inputBuffer) + 1;
-        *singularCommandPtr = '\0';
-        ShellCommand* currCommand = parse_input(currPtr,cwd);
-        if(c == 0) firstCommand = currCommand;
+    // --- STEP 1: Handle the First Command ---
+    int end = strcspn(currPtr, "<>|");
+    char* endOfCommand = currPtr + end;
+    char divider = *endOfCommand; 
+    bool isLast = (divider == '\0'); // It's the last one if we hit the end of string
 
-        currPtr += next;
-        //update to the next iteration(if it exists)
-        if(currCommand != NULL)
-        {
-            nextCommandPtr = strpbrk(currPtr,"<>|");
-            if(nextCommandPtr != NULL)
-            {
-                char devider2 = *nextCommandPtr;
-                next = (int)(&singularCommandPtr - &inputBuffer) + 1;//to advance currPtr after this iteration
-                *nextCommandPtr = '\0';//temporarily to work with it.. we will put devider2 back once we're done with it
-                ShellCommand* nextCommand = parse_input(currPtr,cwd);
-
-                currCommand->nextCommand = nextCommand;//assign this bad boy here
-                switch (devider1)
-                {
-                    case '|':
-                        HANDLE hRead, hWrite;
-                        SECURITY_ATTRIBUTES sa;
-
-                        sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-                        sa.bInheritHandle = TRUE;    // CRITICAL: Allows the child process to "see" the handle
-                        sa.lpSecurityDescriptor = NULL;
-
-                        if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
-                            printf("piping creation failed..\n");
-                            flow = false;
-                        }
-                        currCommand->hOut = hWrite;
-                        nextCommand->hIn = hRead;
-
-                        break;
-                    case '>': 
-                        // 1. Setup Security (Same as you did for Pipe)
-                        SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE }; 
-
-                        // 2. Open/Create the file
-                        // nextCommand->args[0] is the filename (e.g., "out.txt")
-                        HANDLE hFile = CreateFile(
-                            nextCommand->commandName,// Filename
-                            GENERIC_WRITE,            // We want to write to it
-                            FILE_SHARE_READ,          // Let others read it while we work
-                            &sa,                      // Inheritance MUST be TRUE
-                            CREATE_ALWAYS,            // Overwrite if exists, create if not
-                            FILE_ATTRIBUTE_NORMAL,
-                            NULL
-                        );
-
-                        if (hFile == INVALID_HANDLE_VALUE) {
-                            printf("Error: Could not open file for redirection.\n");
-                            flow = false;
-                        } else currCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
-                        break;
-                
-
-                    case '<':
-                        // 1. Setup Security (Same as you did for Pipe)
-                        SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE }; 
-
-                        // 2. Open/Create the file
-                        // nextCommand->args[0] is the filename (e.g., "out.txt")
-                        HANDLE hFile = CreateFile(
-                            currCommand->commandName,// Filename
-                            GENERIC_WRITE,            // We want to write to it
-                            FILE_SHARE_READ,          // Let others read it while we work
-                            &sa,                      // Inheritance MUST be TRUE
-                            CREATE_ALWAYS,            // Overwrite if exists, create if not
-                            FILE_ATTRIBUTE_NORMAL,
-                            NULL
-                        );
-
-                        if (hFile == INVALID_HANDLE_VALUE) {
-                            printf("Error: Could not open file for redirection.\n");
-                            flow = false;
-                        } else nextCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
-                        break;
-                
-                }
-                
-                currPtr += next;
-                *nextCommandPtr = devider2;
-                continue;
-            }
-
-        }
-        c++;
-        
-    }
-
-    ShellCommand* temp = firstCommand;
-    int i = 0;
-
-    printf("\n--- DEBUG: Command Chain ---\n");
-
-    while (temp != NULL) {
-        printf("[%d] Command: %s\n", i++, temp->commandName);
-        
-        // Print the Handles
-        // If these are "00000000", they are NULL (Standard In/Out)
-        // If they have a value, your Redirection/Piping worked!
-        printf("    hIn:  %p (Keyboard or Pipe/File)\n", temp->hIn);
-        printf("    hOut: %p (Screen or Pipe/File)\n", temp->hOut);
-        
-        printf("----------------------------\n");
-
-        // Advance to the next node
-        temp = temp->nextCommand;
-    }
-
-    //free all the parsedCommands with a recursive function:
-    ShellCommand* temp2 = firstCommand;
-    freeChainedCommands(temp2);
+    *endOfCommand = '\0'; // Split the first command
+    firstCommand = parse_input(currPtr, cwd);
     
+    if (firstCommand == NULL) return; // If first parse fails, we're done
+
+    currCommand = firstCommand;
+    prevCommand = firstCommand;
+    // Move pointer past the divider for the next iteration
+    currPtr = endOfCommand + 1;
+
+    int c = 1;
+    while(true)
+    {
+        end = strcspn(currPtr,"<>|");
+        char* endOfCommand = currPtr + end;
+        bool isLast = *endOfCommand !='|' && *endOfCommand != '<' && *endOfCommand != '>';  //if a |<> isnt met that means that this is the last command
+
+        char dividerTemp = *endOfCommand;//save the type of 
+        *endOfCommand = '\0';
+        currCommand = parse_input(currPtr,cwd);
+        c++;
+        if(currCommand == NULL) break;
+        if(prevCommand != NULL)//make the combo
+        {
+            bool comboFailed = false;
+            switch (divider)
+            {
+                case '|':
+                    HANDLE hRead, hWrite;
+                    SECURITY_ATTRIBUTES sp;
+
+                    sp.nLength = sizeof(SECURITY_ATTRIBUTES);
+                    sp.bInheritHandle = TRUE;    // CRITICAL: Allows the child process to "see" the handle
+                    sp.lpSecurityDescriptor = NULL;
+
+                    if (!CreatePipe(&hRead, &hWrite, &sp, 0)) {
+                        printf("piping creation failed..\n");
+                        comboFailed = true;
+                    }
+                    prevCommand->hOut = hWrite;
+                    currCommand->hIn = hRead;
+
+                    break;
+                case '>': 
+                    // 1. Setup Security (Same as you did for Pipe)
+                    SECURITY_ATTRIBUTES sl = { sizeof(sl), NULL, TRUE }; 
+
+                    // 2. Open/Create the file
+                    // nextCommand->args[0] is the filename (e.g., "out.txt")
+                    HANDLE mFile = CreateFile(
+                        currCommand->commandName,// Filename
+                        GENERIC_WRITE,            // We want to write to it
+                        FILE_SHARE_READ,          // Let others read it while we work
+                        &sl,                      // Inheritance MUST be TRUE
+                        CREATE_ALWAYS,            // Overwrite if exists, create if not
+                        FILE_ATTRIBUTE_NORMAL,
+                        NULL
+                    );
+
+                    if (mFile == INVALID_HANDLE_VALUE) {
+                        printf("Error: Could not open file for redirection.\n");
+                        comboFailed = false;
+                    } else prevCommand->hOut = mFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                    break;
+            
+
+                case '<':
+                    // 1. Setup Security (Same as you did for Pipe)
+                    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE }; 
+
+                    // 2. Open/Create the file
+                    // nextCommand->args[0] is the filename (e.g., "out.txt")
+                    HANDLE hFile = CreateFile(
+                        currCommand->commandName,// Filename
+                        GENERIC_WRITE,            // We want to write to it
+                        FILE_SHARE_READ,          // Let others read it while we work
+                        &sa,                      // Inheritance MUST be TRUE
+                        CREATE_ALWAYS,            // Overwrite if exists, create if not
+                        FILE_ATTRIBUTE_NORMAL,
+                        NULL
+                    );
+
+                    if (hFile == INVALID_HANDLE_VALUE) {
+                        printf("Error: Could not open file for redirection.\n");
+                        comboFailed = false;
+                    } else currCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                    break;
+            }
+            
+        }
+
+        prevCommand->nextCommand = currCommand;
+        if(dividerTemp == '\0') break;
+        if(isLast) break;
+        prevCommand = currCommand;
+        currPtr = endOfCommand + 1;
+        divider = dividerTemp;
+    }        
+    
+    if(c > 1)//a check that the loop have actually ran:
+    {
+        ShellCommand* temp = firstCommand;
+        int i = 0;
+
+        printf("\n--- DEBUG: Command Chain ---\n");
+
+        while (IsBadReadPtr(temp, 1) != 0) {
+            printf("[%d] Command: %s\n", i++, temp->commandName);
+            
+            // Print the Handles
+            // If these are "00000000", they are NULL (Standard In/Out)
+            // If they have a value, your Redirection/Piping worked!
+            printf("    hIn:  %p (Keyboard or Pipe/File)\n", temp->hIn);
+            printf("    hOut: %p (Screen or Pipe/File)\n", temp->hOut);
+            
+            printf("----------------------------\n");
+
+            // Advance to the next node
+            temp = temp->nextCommand;
+        }
+
+        //free all the parsedCommands with a recursive function:
+        ShellCommand* temp2 = firstCommand;
+        freeChainedCommands(temp2);
+    }
 
 }
 
@@ -854,21 +863,22 @@ int main()
         inputBuffer[strcspn(inputBuffer, "\n")] = '\0';
         if(strlen(inputBuffer) == 0) continue;//additional shield to protect the allocator
 
-        ShellCommand* currCommand = parse_input(inputBuffer,cwd);
-        if(currCommand == NULL) continue;
-        if(strcmp(currCommand->commandName,"exit") == 0)//if the user typed exit --> we close the shell down 
-        {
-            printf("Closing current shell...\n");
-            break;
-        }
-        // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
-        if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//ls command
-        if(strcmp(currCommand->commandName,"cd") == 0) cd(currCommand,&cwd);//cd command
-        if(strcmp(currCommand->commandName,"exe") == 0) exe(currCommand);//exe command
+        chainCommands(inputBuffer,cwd);
+        // ShellCommand* currCommand = parse_input(inputBuffer,cwd);
+        // if(currCommand == NULL) continue;
+        // if(strcmp(currCommand->commandName,"exit") == 0)//if the user typed exit --> we close the shell down 
+        // {
+        //     printf("Closing current shell...\n");
+        //     break;
+        // }
+        // // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
+        // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//ls command
+        // if(strcmp(currCommand->commandName,"cd") == 0) cd(currCommand,&cwd);//cd command
+        // if(strcmp(currCommand->commandName,"exe") == 0) exe(currCommand);//exe command
 
 
-        memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
-        free(currCommand);
+        // memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
+        // free(currCommand);
         rewind(stdin);
     }
     free(inputBuffer);
