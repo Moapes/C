@@ -784,7 +784,10 @@ void chainCommands(char* inputBuffer,char* cwd)
                     if (mFile == INVALID_HANDLE_VALUE) {
                         printf("Error: Could not open file for redirection.\n");
                         comboFailed = false;
-                    } else prevCommand->hOut = mFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                    } else 
+                    {
+                        prevCommand->hOut = mFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                    }
                     break;
             
 
@@ -807,7 +810,10 @@ void chainCommands(char* inputBuffer,char* cwd)
                     if (hFile == INVALID_HANDLE_VALUE) {
                         printf("Error: Could not open file for redirection.\n");
                         comboFailed = false;
-                    } else currCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                    } else
+                    {
+                        currCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                    } 
                     break;
             }
             
@@ -849,6 +855,45 @@ void chainCommands(char* inputBuffer,char* cwd)
     }
 
 }
+
+//plan for constructing the piping + redirection:
+/*
+piping scenarions:
+1.internal function --> internal function
+2.internal function --> external function
+3.external function --> internal function
+4.external function --> external function 
+
+*/
+//check if a command is internal
+bool isInternal(ShellCommand* command)
+{
+    char* cmdName = command->commandName
+    for(int i = 0; i < DB_SIZE; i++)
+    {
+        if(strcmp(COMMAND_DB[i].name,cmdName) == 0) return true;
+    }
+    return false;
+}
+
+bool executeCommand(ShellCommand* command)
+{
+    bool isInternalCMD = isInternal(command);
+    
+}
+
+void executeCommandsChain(ShellCommand* firstCommand)
+{
+    ShellCommand* curr = firstCommand;//save the pointer
+    while(curr != NULL)
+    {
+        executeCommand(curr);
+        curr = curr->nextCommand;
+    }   
+}
+
+
+
 
 int main()
 {
