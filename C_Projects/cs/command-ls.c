@@ -20,7 +20,7 @@ void printLinkTarget(const char* linkPath) {
 }
 
 //NOTE: for simplicity and testing, the first lsRecursive version WILL be without any checking of other command flags(only -R)
-void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
+void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset,char* search_path)
 {
     WIN32_FIND_DATA findData;
     ZeroMemory(&findData, sizeof(WIN32_FIND_DATA)); // The Windows way to memset
@@ -31,7 +31,7 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
         DWORD error = GetLastError();
         if(error == ERROR_ACCESS_DENIED)
         {
-            printf("permission denied : '%s'\n",search_path);
+            fprintf("permission denied : '%s'\n",search_path);
         }
         // else if (error == ERROR_FILE_NOT_FOUND) --> this is how to check if a file is empty
         FindClose(hFind);
@@ -143,16 +143,17 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
     bool showMoreFileInfo = arg_exists(currCommand->args,'l');
     for(int i = 0; i < childCount; i++)
     {
+        char outputBuffer[1024];
         bool isNavigationDot = sortedFileArray[i]->cFileName[0] == '.';
 
         //print the offset\padding:
         for(int i = 0;i < offset; i++) printf("  ");
         //print the actual find:
-        printf("%s",sortedFileArray[i]->cFileName);
+        strcat(outputBuffer,sortedFileArray[i]->cFileName);
         DWORD attrs = sortedFileArray[i]->dwFileAttributes;
         if(showMoreFileInfo)
         {   
-            printf("  ---  ");
+            strcat(outputBuffer,"  ---  ");
             
             // 1. Permissions / Type String
             char type = (attrs & FILE_ATTRIBUTE_DIRECTORY) ? 'd' : '-';
@@ -162,17 +163,19 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
             char exec = (strstr(name,".exe") || strstr(name,".bat") || strstr(name,".cmd")) ? 'x' : '-';
             char* readWrite = (attrs & FILE_ATTRIBUTE_READONLY) ? "r-" : "rw";
             
-            printf("%c%s%c ", type, readWrite, exec);
-
+            strcat(outputBuffer,type);
+            strcat(outputBuffer,readWrite);
+            strcat(outputBuffer,exec);
+            
             // 2. File Size (Combining High and Low DWORDs)
             uint64_t fileSize = ((uint64_t)sortedFileArray[i]->nFileSizeHigh << 32) | sortedFileArray[i]->nFileSizeLow;
             
             // If it's a directory, typical 'ls' behavior is to show 0 or a block size
             if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
-                printf("%10s ", "<DIR>");
+                strcat(outputBuffer," <DIR> ");
             } else {
                 // Use our new human-readable formatter
-                printf("%10s ", formatSize(fileSize));
+                strcat(outputBuffer,formatSize(fileSize));
             }
 
             // 3. Modification Time
@@ -180,18 +183,30 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
             FileTimeToSystemTime(&sortedFileArray[i]->ftLastWriteTime, &stUTC);
             SystemTimeToTzSpecificLocalTime(NULL, &stUTC, &stLocal); // Convert to your local time
 
-            printf(" %02d/%02d/%d %02d:%02d ", 
+            char dateBuf[64];
+
+            snprintf(dateBuf, sizeof(dateBuf)," %02d/%02d/%d %02d:%02d ", 
                 stLocal.wDay, stLocal.wMonth, stLocal.wYear, 
                 stLocal.wHour, stLocal.wMinute);
 
+            strcat(outputBuffer,dateBuf);
             if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
             {
-                printLinkTarget(sortedFileArray[i]->cFileName);
+                strcat(outputBuffer,sortedFileArray[i]->cFileName);
             }
             
-            printf(" --- ");
+            strcat(outputBuffer,"  ---  ");
         }
-        printf("\n");
+        strcat(outputBuffer,"\n");
+        if(currCommand->hOut != NULL)//send the buffer to the target file if there is one(by handle)
+        {
+            DWORD bytesWritten;
+            if(!WriteFile(currCommand->hOut,outputBuffer,sizeof(outputBuffer),&bytesWritten,NULL));
+            {
+                fprintf(stderr,"Error Writing to file: %lu\n",GetLastError());
+            }
+        }
+        else printf("%s",outputBuffer);//no handle --> just print it
         //recursion:
         if(isRecursive)
         {
@@ -220,38 +235,75 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
     return;
 }
 
-void lsNoArgs(ShellCommand* currCommand,char* cwd)//WIP
+void lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
 {
-    char search_path[2400];
     //add a /* filter to basically tell the findData of windows.h to take everything that is inside that directory
-    snprintf(search_path, 2400, "%s/*",currCommand->path1); 
+    strcat(search_path,"/*"); 
 
     WIN32_FIND_DATA findData;
 
     HANDLE hFind = FindFirstFile(search_path,&findData);
 
     //itirate through the dir until we find the border
+    HANDLE source = currCommand->hOut;
+    bool sourceExists = source != NULL;
+    DWORD bytesWritten;
     do
     {
         if(findData.cFileName[0] == '.' || findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue; //skip .. and . dirs if there is no -a flag
-        printf("%s \n",findData.cFileName);
-        
+        if(sourceExists)//if we need to write the output to another handle and not regular printing:
+        {
+            if(!WriteFile(source, findData.cFileName, strlen(findData.cFileName),&bytesWritten, NULL))
+            {
+                fprintf(stderr,"Failed to write to pipe, Error %lu\n",GetLastError());
+                return;
+            }
+        }
+
+        else printf("%s \n",findData.cFileName);//if no handle just print
     }while(FindNextFile(hFind, &findData ) != 0 );
+
+    if(source != NULL)
+    {
+        CloseHandle(currCommand->hOut);
+        currCommand->hOut = NULL;
+    }
 }
 
 bool ls(ShellCommand* currCommand,char* cwd)
 {
+    char search_path[MAX_PATH];
+    char readBuff[1024];
+    HANDLE source = currCommand->hIn;
+    if(source != NULL)//check if I need to read info from anywhere else
+    {   
+        DWORD bytesRead;
+        while(ReadFile(source, readBuff ,sizeof(readBuff),&bytesRead, NULL) && bytesRead > 0)
+        {//in every iteration we gotta load the chunk to the search_path
+            readBuff[bytesRead] = '\0';//cut the top off of it
+
+            strcat(search_path,readBuff);//append it at the end of search_path
+        }
+    }
+    else//just take the input from the command
+    {
+        snprintf(search_path, MAX_PATH, "%s/*",currCommand->path1);
+    }
     uint64_t* args = (uint64_t*)(currCommand->args);
     bool noArgs = !args;//we wont check args at all if there are none for the duration of the commands doings
     if(noArgs)//we can safely return true after since there cannot be any errors with args, and the shell commmand already finished the user inputs path
     {
-        lsNoArgs(currCommand,cwd);
+        lsNoArgs(currCommand,cwd,search_path);
         return true;
     }
 
-    char search_path[2400];
-    snprintf(search_path, 2400, "%s/*",currCommand->path1);
+    
     int offset = 0;
-    ls_wrapped(currCommand,cwd,search_path,offset);
-
+    ls_wrapped(currCommand,cwd,search_path,offset,search_path);
+    HANDLE dest = currCommand->hOut;
+    if(dest != NULL)//close handle at the end
+    {
+        CloseHandle(dest);
+        currCommand->hOut = NULL;
+    }
 }

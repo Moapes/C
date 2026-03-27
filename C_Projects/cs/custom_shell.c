@@ -860,7 +860,7 @@ void chainCommands(char* inputBuffer,char* cwd)
 /*
 piping scenarions:
 1.internal function --> internal function
-2.internal function --> external function
+2.internal function --> external function : 
 3.external function --> internal function
 4.external function --> external function 
 
@@ -868,7 +868,7 @@ piping scenarions:
 //check if a command is internal
 bool isInternal(ShellCommand* command)
 {
-    char* cmdName = command->commandName
+    char* cmdName = command->commandName;
     for(int i = 0; i < DB_SIZE; i++)
     {
         if(strcmp(COMMAND_DB[i].name,cmdName) == 0) return true;
@@ -876,12 +876,25 @@ bool isInternal(ShellCommand* command)
     return false;
 }
 
+bool executeFromExternal(ShellCommand* command)
+{
+
+}
+
+bool executeFromInternal(ShellCommand* command)
+{
+
+}
+
 bool executeCommand(ShellCommand* command)
 {
     bool isInternalCMD = isInternal(command);
+    bool success;
+    if(isInternalCMD) success = executeFromInternal(command);
+
     
 }
-
+//first we will modify the commmands to write files if there is a handle to it
 void executeCommandsChain(ShellCommand* firstCommand)
 {
     ShellCommand* curr = firstCommand;//save the pointer
