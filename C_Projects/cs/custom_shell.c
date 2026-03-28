@@ -31,6 +31,7 @@ typedef struct ShellCommand{
     //handles for piping logic
     HANDLE hIn;
     HANDLE hOut;
+    DWORD execAttrs;
     ShellCommand* nextCommand;//to create a chain-like (a linked list) system
 }ShellCommand;
 
@@ -49,6 +50,7 @@ const CommandRule COMMAND_DB[] = {
     {"mkdir", "p","TDN","FFN"},
     {"exe","","TDE"},
     {"exit", "","FFE","FFE"},
+    {"redir","","TFN","FFE"}
 };
 
 #define DB_SIZE (sizeof(COMMAND_DB) / sizeof(CommandRule))
@@ -59,6 +61,14 @@ const CommandRule COMMAND_DB[] = {
 #define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 6
 
 #define MIN_CHILDREN_COUNT 16
+
+static char* VIRTUAL_REDIR = "redir";
+
+//bitwise offsets for execAttrs
+#define ATTR_REDIR_IN 2
+#define ATTR_REDIR_OUT 4
+#define ATTR_PIPE_IN 8
+#define ATTR_PIPE_OUT 16
 
 //function for showing nice file size(until TB only)
 const char* formatSize(uint64_t bytes) {
@@ -422,89 +432,95 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
                     sprintf(errorBuffer,"Syntax Error: invalid output redirection args\n");
                     return errorBuffer;
                 }
+                //if everything is corret, we will put the info down
+                nameToken = VIRTUAL_REDIR;
+                path1Token = startOfFileName;
             }
         }
         
     }
-
-
-
-
-
-    // Use strcspn to find the first SPACE (the end of the word)
-    end = start + strcspn(currPtr + start, " "); 
-    nameToken = &targetInputBuffer[start];
-    targetInputBuffer[end] = '\0'; // Cut it
-
-    // --- 2. Advance to the NEXT section ---
-    currPtr = &targetInputBuffer[end + 1]; 
-    start = strspn(currPtr, " ");
-    currPtr += start; // Now currPtr is at the start of Args or Path1
-
-    bool argsMet = false;
-    bool path1Met = false;
-    // --- 3. Handle ARGS (if they exist) ---
-    if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+    else
     {
-        if (*currPtr == '-') {
-            argsToken = currPtr;
-            end = strcspn(currPtr, " "); 
-            currPtr[end] = '\0'; // Cut the args
-            
-            // Advance currPtr past the args to find Path1
-            currPtr += (end + 1);
-            currPtr += strspn(currPtr, " "); // Skip spaces after args
-            argsMet = true;
-        }
+        // Use strcspn to find the first SPACE (the end of the word)
+        end = start + strcspn(currPtr + start, " "); 
+        nameToken = &targetInputBuffer[start];
+        targetInputBuffer[end] = '\0'; // Cut it
 
-        // --- 4. Handle PATH 1 ---
+        // --- 2. Advance to the NEXT section ---
+        currPtr = &targetInputBuffer[end + 1]; 
+        start = strspn(currPtr, " ");
+        currPtr += start; // Now currPtr is at the start of Args or Path1
+
+        bool argsMet = false;
+        bool path1Met = false;
+        // --- 3. Handle ARGS (if they exist) ---
         if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
         {
-            if (*currPtr == '"') {
-                path1Token = currPtr + 1; // Skip the opening "
-                end = strcspn(path1Token, "\""); // Find the closing "
+            if (*currPtr == '-') {
+                argsToken = currPtr;
+                end = strcspn(currPtr, " "); 
+                currPtr[end] = '\0'; // Cut the args
                 
-                if (path1Token[end] == '\0') {
-                    sprintf(errorBuffer, "Syntax Error: Missing closing quote for Path 1\n");
+                // Advance currPtr past the args to find Path1
+                currPtr += (end + 1);
+                currPtr += strspn(currPtr, " "); // Skip spaces after args
+                argsMet = true;
+            }
+
+            // --- 4. Handle PATH 1 ---
+            if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
+            {
+                if (*currPtr == '"') {
+                    path1Token = currPtr + 1; // Skip the opening "
+                    end = strcspn(path1Token, "\""); // Find the closing "
+                    
+                    if (path1Token[end] == '\0') {
+                        sprintf(errorBuffer, "Syntax Error: Missing closing quote for Path 1\n");
+                        return errorBuffer;
+                    }
+                    
+                    path1Token[end] = '\0'; // Cut the path
+                    currPtr = &path1Token[end + 1]; // Move past Path 1
+                    path1Met = true;
+                }
+            
+                if(!path1Met && !argsMet)//the user just typed random shii instead of opening for args or path
+                {
+                    sprintf(errorBuffer,"Syntax Error: Unexpected input in the command call\n");
                     return errorBuffer;
                 }
-                
-                path1Token[end] = '\0'; // Cut the path
-                currPtr = &path1Token[end + 1]; // Move past Path 1
-                path1Met = true;
             }
         
-            if(!path1Met && !argsMet)//the user just typed random shii instead of opening for args or path
+            // --- 5. Handle PATH 2 ---
+            start = strspn(currPtr, " "); // Skip spaces between Path 1 and Path 2
+            currPtr += start;
+            if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
             {
-                sprintf(errorBuffer,"Syntax Error: Unexpected input in the command call\n");
-                return errorBuffer;
-            }
-        }
-    
-        // --- 5. Handle PATH 2 ---
-        start = strspn(currPtr, " "); // Skip spaces between Path 1 and Path 2
-        currPtr += start;
-        if(currPtr < &targetInputBuffer[originalFullLen])//quick boundary check
-        {
 
-            if (*currPtr == '"') {
-                path2Token = currPtr + 1; // Skip opening "
-                end = strcspn(path2Token, "\"");
-                
-                if (path2Token[end] == '\0') {
-                    sprintf(errorBuffer, "Syntax Error: Missing closing quote for Path 2\n");
-                    return errorBuffer;
+                if (*currPtr == '"') {
+                    path2Token = currPtr + 1; // Skip opening "
+                    end = strcspn(path2Token, "\"");
+                    
+                    if (path2Token[end] == '\0') {
+                        sprintf(errorBuffer, "Syntax Error: Missing closing quote for Path 2\n");
+                        return errorBuffer;
+                    }
+                    
+                    path2Token[end] = '\0'; // Cut Path 2
                 }
-                
-                path2Token[end] = '\0'; // Cut Path 2
-            }
-            else//again, the user hasn't typed shii right, we need a "".. not a random character
-            {
-                sprintf(errorBuffer,"Syntax Error: Unexpected input in the command call\n");
-                return errorBuffer;        
+                else//again, the user hasn't typed shii right, we need a "".. not a random character
+                {
+                    sprintf(errorBuffer,"Syntax Error: Unexpected input in the command call\n");
+                    return errorBuffer;        
+                }
             }
         }
+
     }
+
+
+
+
 
 
     //checkup for the command itself
@@ -654,7 +670,7 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
 
     //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
     size_t userInputSize = strlen(nameToken) + sizeof(uint64_t) + strlen(path1Token) + strlen(path2Token);
-    size_t additionalSize = sizeof(ShellCommand) + (sizeof(HANDLE) * 2) + sizeof(ShellCommand*);//for the struct itself, the handles of in and out, and the pointer to the next command in the linked list
+    size_t additionalSize = sizeof(ShellCommand) + (sizeof(HANDLE) * 2) + sizeof(ShellCommand*) + sizeof(DWORD);//for the struct itself, the handles of in and out, and the pointer to the next command in the linked list
     size_t totalSize = userInputSize + additionalSize;
     ShellCommand* parsedCommand = malloc(totalSize);//handles and pointer to the next command update. yay
 
@@ -762,7 +778,9 @@ void chainCommands(char* inputBuffer,char* cwd)
                         comboFailed = true;
                     }
                     prevCommand->hOut = hWrite;
+                    prevCommand->execAttrs |= ATTR_PIPE_OUT;
                     currCommand->hIn = hRead;
+                    currCommand->execAttrs |= ATTR_PIPE_IN;
 
                     break;
                 case '>': 
@@ -787,6 +805,8 @@ void chainCommands(char* inputBuffer,char* cwd)
                     } else 
                     {
                         prevCommand->hOut = mFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                        prevCommand->execAttrs |= ATTR_REDIR_OUT;
+                        currCommand->execAttrs |= ATTR_REDIR_IN;
                     }
                     break;
             
@@ -813,6 +833,8 @@ void chainCommands(char* inputBuffer,char* cwd)
                     } else
                     {
                         currCommand->hOut = hFile;//If everything went good.. we insert the hOut to be the file instead of the printing/output
+                        currCommand->execAttrs |= ATTR_REDIR_OUT;
+                        prevCommand->execAttrs |= ATTR_REDIR_IN;
                     } 
                     break;
             }
@@ -876,12 +898,12 @@ bool isInternal(ShellCommand* command)
     return false;
 }
 
-bool executeFromExternal(ShellCommand* command)
+bool executeExternal(ShellCommand* command)
 {
 
 }
 
-bool executeFromInternal(ShellCommand* command)
+bool executeInternal(ShellCommand* command)
 {
 
 }

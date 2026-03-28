@@ -1,26 +1,26 @@
 #include "./command-ls.h"
 
-void printLinkTarget(const char* linkPath) {
-    // 1. Open the link file (but don't follow it yet!)
-    HANDLE hFile = CreateFileA(linkPath, 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, 
-                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+// void printLinkTarget(const char* linkPath) {
+//     // 1. Open the link file (but don't follow it yet!)
+//     HANDLE hFile = CreateFileA(linkPath, 0, FILE_SHARE_READ, NULL, OPEN_EXISTING, 
+//                               FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
 
-    if (hFile != INVALID_HANDLE_VALUE) {
-        char targetPath[MAX_PATH];
-        // 2. Ask Windows for the "Final" destination
-        DWORD length = GetFinalPathNameByHandleA(hFile, targetPath, MAX_PATH, FILE_NAME_NORMALIZED);
+//     if (hFile != INVALID_HANDLE_VALUE) {
+//         char targetPath[MAX_PATH];
+//         // 2. Ask Windows for the "Final" destination
+//         DWORD length = GetFinalPathNameByHandleA(hFile, targetPath, MAX_PATH, FILE_NAME_NORMALIZED);
         
-        if (length > 0 && length < MAX_PATH) {
-            // Windows adds a "\\?\" prefix to long paths, let's skip it for display
-            char* displayPath = (strncmp(targetPath, "\\\\?\\", 4) == 0) ? targetPath + 4 : targetPath;
-            printf(" -> %s", displayPath);
-        }
-        CloseHandle(hFile);
-    }
-}
+//         if (length > 0 && length < MAX_PATH) {
+//             // Windows adds a "\\?\" prefix to long paths, let's skip it for display
+//             char* displayPath = (strncmp(targetPath, "\\\\?\\", 4) == 0) ? targetPath + 4 : targetPath;
+//             printf(" -> %s", displayPath);
+//         }
+//         CloseHandle(hFile);
+//     }
+// }
 
 //NOTE: for simplicity and testing, the first lsRecursive version WILL be without any checking of other command flags(only -R)
-void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset,char* search_path)
+void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
 {
     WIN32_FIND_DATA findData;
     ZeroMemory(&findData, sizeof(WIN32_FIND_DATA)); // The Windows way to memset
@@ -190,15 +190,15 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
                 stLocal.wHour, stLocal.wMinute);
 
             strcat(outputBuffer,dateBuf);
-            if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
-            {
-                strcat(outputBuffer,sortedFileArray[i]->cFileName);
-            }
+            // if(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
+            // {
+            //     strcat(outputBuffer,sortedFileArray[i]->cFileName);
+            // }
             
             strcat(outputBuffer,"  ---  ");
         }
         strcat(outputBuffer,"\n");
-        if(currCommand->hOut != NULL)//send the buffer to the target file if there is one(by handle)
+        if(currCommand->execAttrs & ATTR_PIPE_OUT || currCommand->execAttrs & ATTR_REDIR_OUT)//send the buffer to the target file if there is one(by handle)
         {
             DWORD bytesWritten;
             if(!WriteFile(currCommand->hOut,outputBuffer,sizeof(outputBuffer),&bytesWritten,NULL));
@@ -275,7 +275,8 @@ bool ls(ShellCommand* currCommand,char* cwd)
     char search_path[MAX_PATH];
     char readBuff[1024];
     HANDLE source = currCommand->hIn;
-    if(source != NULL)//check if I need to read info from anywhere else
+    DWORD execAttrs = currCommand->execAttrs;
+    if(execAttrs & ATTR_PIPE_IN)//check if I need to read info from anywhere else
     {   
         DWORD bytesRead;
         while(ReadFile(source, readBuff ,sizeof(readBuff),&bytesRead, NULL) && bytesRead > 0)
@@ -299,9 +300,9 @@ bool ls(ShellCommand* currCommand,char* cwd)
 
     
     int offset = 0;
-    ls_wrapped(currCommand,cwd,search_path,offset,search_path);
+    ls_wrapped(currCommand,cwd,search_path,offset);
     HANDLE dest = currCommand->hOut;
-    if(dest != NULL)//close handle at the end
+    if(execAttrs & ATTR_PIPE_OUT)//close handle at the end
     {
         CloseHandle(dest);
         currCommand->hOut = NULL;

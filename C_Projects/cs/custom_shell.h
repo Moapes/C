@@ -13,7 +13,13 @@
 #define MAX_INPUT_SIZE 200
 #define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 6
 #define MIN_CHILDREN_COUNT 16
+static char* VIRTUAL_REDIR = "redir";
 
+//bitwise offsets for execAttrs
+#define ATTR_REDIR_IN 2
+#define ATTR_REDIR_OUT 4
+#define ATTR_PIPE_IN 8
+#define ATTR_PIPE_OUT 16
 /* --- Forward Declarations --- */
 // This tells the compiler "ShellCommand exists" so your other .h files 
 // and the struct itself can use pointers to it immediately.
@@ -28,6 +34,7 @@ struct ShellCommand {
     char* path2;
     HANDLE hIn;
     HANDLE hOut;
+    DWORD execAttrs;
     ShellCommand* nextCommand; // This now works because of the forward declaration
 };
 
