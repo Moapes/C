@@ -1,6 +1,6 @@
 #ifndef EXE_COMMAND
 #include "./custom_shell.h"
 
-void exe(ShellCommand* currCommand);
+bool exe(ShellCommand* currCommand);
 
 #endif //EXE_COMMAND

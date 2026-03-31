@@ -20,7 +20,7 @@
 // }
 
 //NOTE: for simplicity and testing, the first lsRecursive version WILL be without any checking of other command flags(only -R)
-void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
+bool ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset)
 {
     WIN32_FIND_DATA findData;
     ZeroMemory(&findData, sizeof(WIN32_FIND_DATA)); // The Windows way to memset
@@ -35,7 +35,7 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
         }
         // else if (error == ERROR_FILE_NOT_FOUND) --> this is how to check if a file is empty
         FindClose(hFind);
-        return;
+        return false;
     }
     //cycle through the folder, the moment we find another folder - we cycling through it through an additional function call
     bool showAll = arg_exists(currCommand->args,'a');//check -a flag
@@ -203,7 +203,8 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
             DWORD bytesWritten;
             if(!WriteFile(currCommand->hOut,outputBuffer,sizeof(outputBuffer),&bytesWritten,NULL));
             {
-                fprintf(stderr,"Error Writing to file: %lu\n",GetLastError());
+                printf("Error Writing to file: %lu\n",GetLastError());
+                return false;
             }
         }
         else printf("%s",outputBuffer);//no handle --> just print it
@@ -224,7 +225,8 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
                     // strcat(temp,"/");
                     strcat(temp,sortedFileArray[i]->cFileName);
                     strcat(temp,"/*");
-                    ls_wrapped(currCommand,cwd,temp,offset + 1);
+                    bool success = ls_wrapped(currCommand,cwd,temp,offset + 1);
+                    if(!success) return false;
                 }
             }
         }
@@ -232,10 +234,10 @@ void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
     FindClose(hFind);
     free(sortedFileArray);
     free(filesArray);
-    return;
+    return true;
 }
 
-void lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
+bool lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
 {
     //add a /* filter to basically tell the findData of windows.h to take everything that is inside that directory
     strcat(search_path,"/*"); 
@@ -255,8 +257,8 @@ void lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
         {
             if(!WriteFile(source, findData.cFileName, strlen(findData.cFileName),&bytesWritten, NULL))
             {
-                fprintf(stderr,"Failed to write to pipe, Error %lu\n",GetLastError());
-                return;
+                printf("Failed to write to pipe, Error %lu\n",GetLastError());
+                return false;
             }
         }
 
@@ -272,7 +274,7 @@ void lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
 
 bool ls(ShellCommand* currCommand,char* cwd)
 {
-    char search_path[MAX_PATH];
+    char search_path[MAX_PATH] = {0};
     char readBuff[1024];
     HANDLE source = currCommand->hIn;
     DWORD execAttrs = currCommand->execAttrs;
@@ -286,7 +288,7 @@ bool ls(ShellCommand* currCommand,char* cwd)
             strcat(search_path,readBuff);//append it at the end of search_path
         }
     }
-    else//just take the input from the command
+    else if(search_path[0] == '\0')//just take the input from the command
     {
         snprintf(search_path, MAX_PATH, "%s/*",currCommand->path1);
     }
@@ -294,17 +296,20 @@ bool ls(ShellCommand* currCommand,char* cwd)
     bool noArgs = !args;//we wont check args at all if there are none for the duration of the commands doings
     if(noArgs)//we can safely return true after since there cannot be any errors with args, and the shell commmand already finished the user inputs path
     {
-        lsNoArgs(currCommand,cwd,search_path);
+        bool success = lsNoArgs(currCommand,cwd,search_path);
+        if(!success) return false;
         return true;
     }
 
     
     int offset = 0;
-    ls_wrapped(currCommand,cwd,search_path,offset);
+    bool success = ls_wrapped(currCommand,cwd,search_path,offset);
+    if(!success) return false;
     HANDLE dest = currCommand->hOut;
     if(execAttrs & ATTR_PIPE_OUT)//close handle at the end
     {
         CloseHandle(dest);
         currCommand->hOut = NULL;
     }
+    return true;
 }

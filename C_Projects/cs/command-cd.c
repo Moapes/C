@@ -31,6 +31,12 @@ bool cd(ShellCommand* currCommand,char** cwd)
         free(*cwd);//free the old pointer
         *cwd = newCWDPtr;//new pointerr
     }
-    if(execAttrs & ATTR_PIPE_OUT) false;
-}
+    if(execAttrs & ATTR_PIPE_OUT)
+    {   
+        printf("change directory command output cannot be redirected / piped\n");
+        CloseHandle(currCommand->hOut);
+        return false;
+    }
+}   
+
 

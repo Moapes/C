@@ -720,6 +720,10 @@ void freeChainedCommands(ShellCommand* firstCommand)
     if(firstCommand == NULL) return;
     if(IsBadReadPtr(firstCommand, 1) == 0) return;
     freeChainedCommands(firstCommand->nextCommand);
+    HANDLE hInput = firstCommand->hIn;
+    HANDLE hOutput = firstCommand->hOut;
+    if(hInput != NULL) CloseHandle(hInput);
+    if(hOutput != NULL) CloseHandle(hOutput);
     free(firstCommand);
 }
 
@@ -873,58 +877,41 @@ void chainCommands(char* inputBuffer,char* cwd)
 
         //free all the parsedCommands with a recursive function:
         ShellCommand* temp2 = firstCommand;
-        freeChainedCommands(temp2);
     }
 
 }
 
-//plan for constructing the piping + redirection:
-/*
-piping scenarions:
-1.internal function --> internal function
-2.internal function --> external function : 
-3.external function --> internal function
-4.external function --> external function 
 
-*/
-//check if a command is internal
-bool isInternal(ShellCommand* command)
+
+
+bool executeInternal(ShellCommand* command,char** cwd)
 {
-    char* cmdName = command->commandName;
-    for(int i = 0; i < DB_SIZE; i++)
-    {
-        if(strcmp(COMMAND_DB[i].name,cmdName) == 0) return true;
-    }
-    return false;
+    char* cName = command->commandName;
+    bool success = false;
+    if(strcmp(cName,"cd") == 0) cd(command,cwd);
+    else if(strcmp(cName,"ls") == 0) success = ls(command,*cwd);
+    else if(strcmp(cName,"redir") == 0) success = redir(command);
+    else if(strcmp(cName,"exe") == 0) success = exe(command);
+    return success;
 }
 
-bool executeExternal(ShellCommand* command)
-{
-
-}
-
-bool executeInternal(ShellCommand* command)
-{
-
-}
-
-bool executeCommand(ShellCommand* command)
+bool executeCommand(ShellCommand* command, char** cwd)
 {
     bool isInternalCMD = isInternal(command);
     bool success;
-    if(isInternalCMD) success = executeFromInternal(command);
-
-    
+    success = executeInternal(command,cwd);
 }
 //first we will modify the commmands to write files if there is a handle to it
-void executeCommandsChain(ShellCommand* firstCommand)
+void executeCommandsChain(ShellCommand* firstCommand,char** cwd)
 {
     ShellCommand* curr = firstCommand;//save the pointer
-    while(curr != NULL)
+    bool success = true;
+    while(curr != NULL && success)
     {
-        executeCommand(curr);
+        success = executeCommand(curr, cwd);
         curr = curr->nextCommand;
     }   
+    freeChainedCommands(firstCommand);
 }
 
 

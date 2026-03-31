@@ -81,5 +81,6 @@ CommandChain* craftCommandChain(char* inputBuffer, char* cwd);
 #include "command-cd.h"
 #include "command-exe.h"
 #include "command-ls.h"
+#include "command-redir.h"
 
 #endif // SHELL_H
