@@ -18,7 +18,7 @@ bool cd(ShellCommand* currCommand,char** cwd)
             strcat(tempCWDBuff,readBuff);
         }
         newLen = strlen(tempCWDBuff);
-        newCWDPtr = (char*)malloc(tempCWDBuff + 1);
+        newCWDPtr = (char*)malloc(newLen + 1);
         strcpy(newCWDPtr,tempCWDBuff);
         free(*cwd);
         *cwd = newCWDPtr;

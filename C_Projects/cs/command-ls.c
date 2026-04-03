@@ -31,7 +31,7 @@ bool ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
         DWORD error = GetLastError();
         if(error == ERROR_ACCESS_DENIED)
         {
-            fprintf("permission denied : '%s'\n",search_path);
+            printf("permission denied : '%s'\n",search_path);
         }
         // else if (error == ERROR_FILE_NOT_FOUND) --> this is how to check if a file is empty
         FindClose(hFind);
@@ -163,9 +163,19 @@ bool ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
             char exec = (strstr(name,".exe") || strstr(name,".bat") || strstr(name,".cmd")) ? 'x' : '-';
             char* readWrite = (attrs & FILE_ATTRIBUTE_READONLY) ? "r-" : "rw";
             
-            strcat(outputBuffer,type);
-            strcat(outputBuffer,readWrite);
-            strcat(outputBuffer,exec);
+            // 1. Create a small buffer for this specific line
+            char line[MAX_PATH + 128]; 
+
+            // 2. Format the entire string at once. 
+            // %c handles the chars (type, exec), %s handles the string (readWrite)
+            snprintf(line, sizeof(line), "%c%s%c %s\n", 
+                    type, 
+                    readWrite, 
+                    exec, 
+                    name);
+
+            // 3. Now add the completed line to your main outputBuffer
+            strcat(outputBuffer, line);
             
             // 2. File Size (Combining High and Low DWORDs)
             uint64_t fileSize = ((uint64_t)sortedFileArray[i]->nFileSizeHigh << 32) | sortedFileArray[i]->nFileSizeLow;

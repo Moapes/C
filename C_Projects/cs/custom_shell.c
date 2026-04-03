@@ -166,14 +166,12 @@ char pathCreatable(char *dir)
     //get the header of the dir(the file)
     char* tempToken = strtok(dir,"/");//temp token for itiration
     char* restOfDir[strlen(dir)];
-    char* headerToken;
     int cOfDirParts = sumOfDirParts(dir);
     int c = 0;
     while(tempToken != NULL)
     {
-        c++;
-        if(c == cOfDirParts) strcpy(headerToken,tempToken);            
-        else
+        c++;           
+        if(c != cOfDirParts)
         {
             strcat(*restOfDir,tempToken);
             strcat(*restOfDir,"/");
@@ -197,15 +195,18 @@ char pathCreatable(char *dir)
     if(hFind == INVALID_HANDLE_VALUE) 
     {
         FindClose(hFind);
-        return 'F';
+        return 'T';
     }
     FindClose(hFind);
-    return 'T';
+    return 'F';
 
 }
 
-void generateAbsolutePath(char* inputPath, char* cwd,char* finalDestinationPath)
+void generateAbsolutePath(char* inputPath, char* inputCwd,char* finalDestinationPath)
 {
+    char cwdBuf[strlen(inputCwd)];
+    strcpy(cwdBuf,inputCwd);
+    char* cwd = cwdBuf;
     if(inputPath == NULL) 
     {
         memset(finalDestinationPath, 0, sizeof(finalDestinationPath));//remove memory garbage first
@@ -417,7 +418,11 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
                 return errorBuffer;
             }
             *fileNameEnd = '\0';//null terminate the qoute to establish bounadry
-            DWORD dwAttrib = GetFileAttributes(startOfFileName);
+            char tempPath1[256] = {0};
+            char* vPtr = tempPath1;
+            generateAbsolutePath(startOfFileName,cwd,*p1);
+            translateENVars(vPtr,*p1);
+            DWORD dwAttrib = GetFileAttributes(*p1);
             if(dwAttrib != INVALID_FILE_ATTRIBUTES)//actual dir
             {
                 if(dwAttrib & FILE_ATTRIBUTE_DIRECTORY)//Its a folder(bad)
@@ -433,8 +438,8 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
                     return errorBuffer;
                 }
                 //if everything is corret, we will put the info down
-                nameToken = VIRTUAL_REDIR;
-                path1Token = startOfFileName;
+                *fN = VIRTUAL_REDIR;
+                return NULL;
             }
         }
         
@@ -656,7 +661,9 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
     char* nameToken = NULL; 
     uint64_t argsToken = 0;
     char* path1Token = malloc(256);
+    memset(path1Token,0,256);
     char* path2Token = malloc(256);
+    memset(path2Token,0,256);
 
     if (!inputBuffer || inputBuffer[0] == '\0') return NULL;
     char* output = checkInputErrors(inputBuffer,cwd,&nameToken,&argsToken,&path1Token,&path2Token);
@@ -727,9 +734,9 @@ void freeChainedCommands(ShellCommand* firstCommand)
     free(firstCommand);
 }
 
-void chainCommands(char* inputBuffer,char* cwd)
+ShellCommand* chainCommands(char* inputBuffer,char* cwd)
 {
-    if (inputBuffer == NULL) return;
+    if (inputBuffer == NULL) return NULL;
 
     char* currPtr = inputBuffer;
     ShellCommand* firstCommand = NULL;
@@ -745,7 +752,7 @@ void chainCommands(char* inputBuffer,char* cwd)
     *endOfCommand = '\0'; // Split the first command
     firstCommand = parse_input(currPtr, cwd);
     
-    if (firstCommand == NULL) return; // If first parse fails, we're done
+    if (firstCommand == NULL) return NULL; // If first parse fails, we're done
 
     currCommand = firstCommand;
     prevCommand = firstCommand;
@@ -794,7 +801,7 @@ void chainCommands(char* inputBuffer,char* cwd)
                     // 2. Open/Create the file
                     // nextCommand->args[0] is the filename (e.g., "out.txt")
                     HANDLE mFile = CreateFile(
-                        currCommand->commandName,// Filename
+                        currCommand->path1,// Filename
                         GENERIC_WRITE,            // We want to write to it
                         FILE_SHARE_READ,          // Let others read it while we work
                         &sl,                      // Inheritance MUST be TRUE
@@ -822,7 +829,7 @@ void chainCommands(char* inputBuffer,char* cwd)
                     // 2. Open/Create the file
                     // nextCommand->args[0] is the filename (e.g., "out.txt")
                     HANDLE hFile = CreateFile(
-                        currCommand->commandName,// Filename
+                        currCommand->path1,// Filename
                         GENERIC_WRITE,            // We want to write to it
                         FILE_SHARE_READ,          // Let others read it while we work
                         &sa,                      // Inheritance MUST be TRUE
@@ -853,33 +860,11 @@ void chainCommands(char* inputBuffer,char* cwd)
         divider = dividerTemp;
     }        
     
-    if(c > 1)//a check that the loop have actually ran:
-    {
-        ShellCommand* temp = firstCommand;
-        int i = 0;
-
-        printf("\n--- DEBUG: Command Chain ---\n");
-
-        while (IsBadReadPtr(temp, 1) != 0) {
-            printf("[%d] Command: %s\n", i++, temp->commandName);
-            
-            // Print the Handles
-            // If these are "00000000", they are NULL (Standard In/Out)
-            // If they have a value, your Redirection/Piping worked!
-            printf("    hIn:  %p (Keyboard or Pipe/File)\n", temp->hIn);
-            printf("    hOut: %p (Screen or Pipe/File)\n", temp->hOut);
-            
-            printf("----------------------------\n");
-
-            // Advance to the next node
-            temp = temp->nextCommand;
-        }
-
-        //free all the parsedCommands with a recursive function:
-        ShellCommand* temp2 = firstCommand;
-    }
-
+    //free all the parsedCommands with a recursive function:
+    return firstCommand;
 }
+
+
 
 
 
@@ -888,7 +873,7 @@ bool executeInternal(ShellCommand* command,char** cwd)
 {
     char* cName = command->commandName;
     bool success = false;
-    if(strcmp(cName,"cd") == 0) cd(command,cwd);
+    if(strcmp(cName,"cd") == 0) success = cd(command,cwd);
     else if(strcmp(cName,"ls") == 0) success = ls(command,*cwd);
     else if(strcmp(cName,"redir") == 0) success = redir(command);
     else if(strcmp(cName,"exe") == 0) success = exe(command);
@@ -897,7 +882,6 @@ bool executeInternal(ShellCommand* command,char** cwd)
 
 bool executeCommand(ShellCommand* command, char** cwd)
 {
-    bool isInternalCMD = isInternal(command);
     bool success;
     success = executeInternal(command,cwd);
 }
@@ -919,10 +903,11 @@ void executeCommandsChain(ShellCommand* firstCommand,char** cwd)
 
 int main()
 {
-    char first_cwd_text[] = "D:";//first default cwd, in the future will be modifiable
+    char first_cwd_text[] = "D:/C/C_Projects/cma";//first default cwd, in the future will be modifiable
     char* cwd = malloc(strlen(first_cwd_text) + 1);//+1 for null terminator
     strcpy(cwd,first_cwd_text);
     char* inputBuffer = (char*)malloc(MAX_INPUT_SIZE);
+    memset(inputBuffer,0,MAX_INPUT_SIZE);
     while(1)//loop forever and ask for command input from the user until he exits(exit command)
     {
         printf("%s> ",cwd);
@@ -930,7 +915,8 @@ int main()
         inputBuffer[strcspn(inputBuffer, "\n")] = '\0';
         if(strlen(inputBuffer) == 0) continue;//additional shield to protect the allocator
 
-        chainCommands(inputBuffer,cwd);
+        ShellCommand* firstCommand = chainCommands(inputBuffer,cwd);
+        executeCommandsChain(firstCommand,&cwd);
         // ShellCommand* currCommand = parse_input(inputBuffer,cwd);
         // if(currCommand == NULL) continue;
         // if(strcmp(currCommand->commandName,"exit") == 0)//if the user typed exit --> we close the shell down 
@@ -947,6 +933,7 @@ int main()
         // memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
         // free(currCommand);
         rewind(stdin);
+        memset(inputBuffer,0,MAX_INPUT_SIZE);
     }
     free(inputBuffer);
     free(cwd);

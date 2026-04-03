@@ -13,8 +13,6 @@
 #define MAX_INPUT_SIZE 200
 #define DISTANCE_BETWEEN_ASCII_LOWER_UPPER 6
 #define MIN_CHILDREN_COUNT 16
-static char* VIRTUAL_REDIR = "redir";
-
 //bitwise offsets for execAttrs
 #define ATTR_REDIR_IN 2
 #define ATTR_REDIR_OUT 4
@@ -72,7 +70,7 @@ void translateENVars(char* destinationPath, char* userPath);
 // Parsing & Validation
 char* checkInputErrors(char* targetInputBuffer, char* cwd, char** fN, uint64_t* args, char** p1, char** p2);
 ShellCommand* parse_input(char* inputBuffer, char* cwd);
-CommandChain* craftCommandChain(char* inputBuffer, char* cwd);
+ShellCommand* chainCommands(char* inputBuffer, char* cwd);
 
 /* --- Sub-Module Includes --- */
 // We include these AFTER the structs are defined so they can 

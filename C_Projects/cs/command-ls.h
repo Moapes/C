@@ -3,8 +3,8 @@
 
 
 void printLinkTarget(const char* linkPath);
-void ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset);
-void lsNoArgs(ShellCommand* currCommand,char* cwd);
+bool ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset);
+bool lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path);
 bool ls(ShellCommand* currCommand,char* cwd);
 
 #endif //LS_COMMAND
