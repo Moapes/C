@@ -653,9 +653,6 @@ char* checkInputErrors(char* targetInputBuffer,char* cwd,char** fN,uint64_t* arg
 
 
 
-//this function takes an input that will look like this:
-//<command>  -<flags> <path> (each property can be null besides the command name block)
-//NOTE: WE WILL UPDATE IT SO THE CheckInputErrors function will already give us the tokens required for the parsing, so we won't do the parsing and the dir absolution 2 times and only 1 time, saving memmory and computing time
 ShellCommand* parse_input(char* inputBuffer,char* cwd)
 {
     char* nameToken = NULL; 
@@ -675,21 +672,22 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
         return NULL;
     }
 
-    //calc total size of all the user data to know exactly how much to allocate (totalsize + the size of the struct itself)
-    size_t userInputSize = strlen(nameToken) + sizeof(uint64_t) + strlen(path1Token) + strlen(path2Token);
-    size_t additionalSize = sizeof(ShellCommand) + (sizeof(HANDLE) * 2) + sizeof(ShellCommand*) + sizeof(DWORD);//for the struct itself, the handles of in and out, and the pointer to the next command in the linked list
+    size_t userInputSize = strlen(nameToken) + sizeof(uint64_t) + strlen(path1Token) + strlen(path2Token) + 4; // +4 for null terminators
+    size_t additionalSize = sizeof(ShellCommand) + (sizeof(HANDLE) * 2) + sizeof(ShellCommand*) + sizeof(DWORD);
     size_t totalSize = userInputSize + additionalSize;
-    ShellCommand* parsedCommand = malloc(totalSize);//handles and pointer to the next command update. yay
+    ShellCommand* parsedCommand = malloc(totalSize);
 
-    char* dataStart = (char*)(parsedCommand + additionalSize);//we will enter the nextCommand arg, + the two HANDLES after this functions so we gotta make sure the caller can insert it from the starting pointer
+    // FIX 1: Initialize the WHOLE block
+    memset(parsedCommand, 0, totalSize);
+
+    char* dataStart = (char*)(parsedCommand) + additionalSize;
 
     if(nameToken != NULL)
     {
         parsedCommand->commandName = dataStart;
-        memcpy(dataStart, nameToken, strlen(nameToken) + 1);//same heree brotein shake
+        memcpy(dataStart, nameToken, strlen(nameToken) + 1);
         dataStart += strlen(nameToken) + 1;
     }
-    else parsedCommand->commandName = NULL;
 
     if(argsToken != 0)
     {
@@ -700,41 +698,42 @@ ShellCommand* parse_input(char* inputBuffer,char* cwd)
         *dataStart = '\0';
         dataStart += 1; 
     }
-    else parsedCommand->args = NULL;
 
     if(strlen(path1Token) != 0)
     {
         parsedCommand->path1 = dataStart;
-        memcpy(dataStart, path1Token, strlen(path1Token) + 1);//+1 to capture the null terminator
+        memcpy(dataStart, path1Token, strlen(path1Token) + 1);
         dataStart += strlen(path1Token) + 1;
     }
-    else parsedCommand->path1 = NULL;
 
     if(strlen(path2Token) != 0)
     {
         parsedCommand->path2 = dataStart;
-        memcpy(dataStart, path2Token, strlen(path2Token) + 1);//same here
-        dataStart += strlen(path1Token) + 1;
+        memcpy(dataStart, path2Token, strlen(path2Token) + 1);
+        // FIX 2: Use the correct token length for the increment
+        dataStart += strlen(path2Token) + 1; 
     }
-    else parsedCommand->path2 = NULL;
+
     free(path1Token);
     free(path2Token);
+    
     return parsedCommand;
 }
 
-void freeChainedCommands(ShellCommand* firstCommand)
+
+void freeChainedCommands(ShellCommand** firstCommand)
 {
-    if(firstCommand == NULL) return;
-    if(IsBadReadPtr(firstCommand, 1) == 0) return;
-    freeChainedCommands(firstCommand->nextCommand);
-    HANDLE hInput = firstCommand->hIn;
-    HANDLE hOutput = firstCommand->hOut;
-    if(hInput != NULL) CloseHandle(hInput);
-    if(hOutput != NULL) CloseHandle(hOutput);
-    free(firstCommand);
+    if(firstCommand == NULL || *firstCommand == NULL) return;
+    freeChainedCommands(&((*firstCommand)->nextCommand));
+    HANDLE hInput = (*firstCommand)->hIn;
+    HANDLE hOutput = (*firstCommand)->hOut;
+    if(hInput != NULL && hInput != GetStdHandle(STD_INPUT_HANDLE)) CloseHandle(hInput);
+    if(hOutput != NULL && hOutput != GetStdHandle(STD_OUTPUT_HANDLE)) CloseHandle(hOutput);
+    free(*firstCommand);
+    *firstCommand = NULL;
 }
 
-ShellCommand* chainCommands(char* inputBuffer,char* cwd)
+ShellCommand** chainCommands(char* inputBuffer,char* cwd)
 {
     if (inputBuffer == NULL) return NULL;
 
@@ -770,7 +769,12 @@ ShellCommand* chainCommands(char* inputBuffer,char* cwd)
         *endOfCommand = '\0';
         currCommand = parse_input(currPtr,cwd);
         c++;
-        if(currCommand == NULL) break;
+        if(currCommand == NULL)
+        {
+            prevCommand->nextCommand = NULL;
+            break;
+        }
+
         if(prevCommand != NULL)//make the combo
         {
             bool comboFailed = false;
@@ -788,6 +792,7 @@ ShellCommand* chainCommands(char* inputBuffer,char* cwd)
                         printf("piping creation failed..\n");
                         comboFailed = true;
                     }
+                    prevCommand->hOut = hWrite;
                     prevCommand->hOut = hWrite;
                     prevCommand->execAttrs |= ATTR_PIPE_OUT;
                     currCommand->hIn = hRead;
@@ -856,44 +861,47 @@ ShellCommand* chainCommands(char* inputBuffer,char* cwd)
         if(dividerTemp == '\0') break;
         if(isLast) break;
         prevCommand = currCommand;
-        currPtr = endOfCommand + 1;
+        currPtr += strspn(currPtr, " ");
         divider = dividerTemp;
     }        
     
     //free all the parsedCommands with a recursive function:
-    return firstCommand;
+    ShellCommand** finalResult = malloc(sizeof(ShellCommand*));
+    if(finalResult) *finalResult = firstCommand;
+    return finalResult;
 }
 
 
 
 
 
-
-bool executeInternal(ShellCommand* command,char** cwd)
+bool executeInternal(ShellCommand** command,char** cwd)
 {
-    char* cName = command->commandName;
+    char* cName = (*command)->commandName;
+    if(strcmp(cName,"redir") == 0) return true;//skip redir
     bool success = false;
-    if(strcmp(cName,"cd") == 0) success = cd(command,cwd);
-    else if(strcmp(cName,"ls") == 0) success = ls(command,*cwd);
-    else if(strcmp(cName,"redir") == 0) success = redir(command);
-    else if(strcmp(cName,"exe") == 0) success = exe(command);
+    if(strcmp(cName,"cd") == 0) success = cd(*command,cwd);
+    else if(strcmp(cName,"ls") == 0) success = ls(*command,*cwd);
+    // else if(strcmp(cName,"redir") == 0) success = redir(*command);
+    else if(strcmp(cName,"exe") == 0) success = exe(*command);
     return success;
 }
 
-bool executeCommand(ShellCommand* command, char** cwd)
+bool executeCommand(ShellCommand** command, char** cwd)
 {
     bool success;
     success = executeInternal(command,cwd);
+    return success;
 }
 //first we will modify the commmands to write files if there is a handle to it
-void executeCommandsChain(ShellCommand* firstCommand,char** cwd)
+void executeCommandsChain(ShellCommand** firstCommand,char** cwd)
 {
-    ShellCommand* curr = firstCommand;//save the pointer
+    ShellCommand** curr = firstCommand;//save the pointer
     bool success = true;
-    while(curr != NULL && success)
+    while(curr != NULL && *curr != NULL && success)
     {
         success = executeCommand(curr, cwd);
-        curr = curr->nextCommand;
+        curr = &((*curr)->nextCommand);
     }   
     freeChainedCommands(firstCommand);
 }
@@ -915,23 +923,10 @@ int main()
         inputBuffer[strcspn(inputBuffer, "\n")] = '\0';
         if(strlen(inputBuffer) == 0) continue;//additional shield to protect the allocator
 
-        ShellCommand* firstCommand = chainCommands(inputBuffer,cwd);
+        ShellCommand** firstCommand = chainCommands(inputBuffer,cwd);
         executeCommandsChain(firstCommand,&cwd);
-        // ShellCommand* currCommand = parse_input(inputBuffer,cwd);
-        // if(currCommand == NULL) continue;
-        // if(strcmp(currCommand->commandName,"exit") == 0)//if the user typed exit --> we close the shell down 
-        // {
-        //     printf("Closing current shell...\n");
-        //     break;
-        // }
-        // // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);
-        // if(strcmp(currCommand->commandName,"ls") == 0) ls(currCommand,cwd);//ls command
-        // if(strcmp(currCommand->commandName,"cd") == 0) cd(currCommand,&cwd);//cd command
-        // if(strcmp(currCommand->commandName,"exe") == 0) exe(currCommand);//exe command
-
-
-        // memset(inputBuffer, 0, MAX_INPUT_SIZE);//null terminate the whole input buffer after every single interpertation
-        // free(currCommand);
+        free(firstCommand);
+        
         rewind(stdin);
         memset(inputBuffer,0,MAX_INPUT_SIZE);
     }

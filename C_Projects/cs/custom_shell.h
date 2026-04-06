@@ -70,7 +70,7 @@ void translateENVars(char* destinationPath, char* userPath);
 // Parsing & Validation
 char* checkInputErrors(char* targetInputBuffer, char* cwd, char** fN, uint64_t* args, char** p1, char** p2);
 ShellCommand* parse_input(char* inputBuffer, char* cwd);
-ShellCommand* chainCommands(char* inputBuffer, char* cwd);
+ShellCommand** chainCommands(char* inputBuffer, char* cwd);
 
 /* --- Sub-Module Includes --- */
 // We include these AFTER the structs are defined so they can 

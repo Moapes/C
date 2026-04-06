@@ -143,7 +143,7 @@ bool ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
     bool showMoreFileInfo = arg_exists(currCommand->args,'l');
     for(int i = 0; i < childCount; i++)
     {
-        char outputBuffer[1024];
+        char outputBuffer[1024] = {0};
         bool isNavigationDot = sortedFileArray[i]->cFileName[0] == '.';
 
         //print the offset\padding:
@@ -211,7 +211,7 @@ bool ls_wrapped(ShellCommand* currCommand,char* cwd,char* search_path,int offset
         if(currCommand->execAttrs & ATTR_PIPE_OUT || currCommand->execAttrs & ATTR_REDIR_OUT)//send the buffer to the target file if there is one(by handle)
         {
             DWORD bytesWritten;
-            if(!WriteFile(currCommand->hOut,outputBuffer,sizeof(outputBuffer),&bytesWritten,NULL));
+            if(!WriteFile(currCommand->hOut,outputBuffer,sizeof(outputBuffer),&bytesWritten,NULL))
             {
                 printf("Error Writing to file: %lu\n",GetLastError());
                 return false;
@@ -257,15 +257,15 @@ bool lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
     HANDLE hFind = FindFirstFile(search_path,&findData);
 
     //itirate through the dir until we find the border
-    HANDLE source = currCommand->hOut;
-    bool sourceExists = source != NULL;
+    HANDLE destination = currCommand->hOut;
+    bool destinationExists = destination != NULL;
     DWORD bytesWritten;
     do
     {
         if(findData.cFileName[0] == '.' || findData.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue; //skip .. and . dirs if there is no -a flag
-        if(sourceExists)//if we need to write the output to another handle and not regular printing:
+        if(destinationExists)//if we need to write the output to another handle and not regular printing:
         {
-            if(!WriteFile(source, findData.cFileName, strlen(findData.cFileName),&bytesWritten, NULL))
+            if(!WriteFile(destination, findData.cFileName, strlen(findData.cFileName),&bytesWritten, NULL))
             {
                 printf("Failed to write to pipe, Error %lu\n",GetLastError());
                 return false;
@@ -275,11 +275,8 @@ bool lsNoArgs(ShellCommand* currCommand,char* cwd,char* search_path)//WIP
         else printf("%s \n",findData.cFileName);//if no handle just print
     }while(FindNextFile(hFind, &findData ) != 0 );
 
-    if(source != NULL)
-    {
-        CloseHandle(currCommand->hOut);
-        currCommand->hOut = NULL;
-    }
+
+    return true;
 }
 
 bool ls(ShellCommand* currCommand,char* cwd)
@@ -291,7 +288,7 @@ bool ls(ShellCommand* currCommand,char* cwd)
     if(execAttrs & ATTR_PIPE_IN)//check if I need to read info from anywhere else
     {   
         DWORD bytesRead;
-        while(ReadFile(source, readBuff ,sizeof(readBuff),&bytesRead, NULL) && bytesRead > 0)
+        while(ReadFile(source, readBuff ,strlen(readBuff),&bytesRead, NULL) && bytesRead > 0)
         {//in every iteration we gotta load the chunk to the search_path
             readBuff[bytesRead] = '\0';//cut the top off of it
 
@@ -316,10 +313,5 @@ bool ls(ShellCommand* currCommand,char* cwd)
     bool success = ls_wrapped(currCommand,cwd,search_path,offset);
     if(!success) return false;
     HANDLE dest = currCommand->hOut;
-    if(execAttrs & ATTR_PIPE_OUT)//close handle at the end
-    {
-        CloseHandle(dest);
-        currCommand->hOut = NULL;
-    }
     return true;
 }
