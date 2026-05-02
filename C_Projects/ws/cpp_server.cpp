@@ -17,7 +17,7 @@
 
 enum CommandID {
     CMD_LOGIN = 1,
-    CMD_SIGNIN = 2,
+    CMD_SIGNUP = 2,
     CMD_LOGOUT = 3,
 };
 
@@ -30,17 +30,23 @@ typedef struct {
     size_t user_pswd_len;
     sockaddr_in client_addr;
     SOCKET client_socket;
+    sqlite3* db;
 }sqlUser_data;
 
 typedef struct {
     SOCKET client_socket;
     sockaddr_in client_addr;
+    sqlite3* db;
 }setup_user_data;
 
 std::vector<sqlUser_data*> active_users;
 std::mutex active_users_mutex;
 
-
+#define LOGIN_SUCCESS 1
+#define USERNAME_EXISTS 2
+#define USERNAME_INCORRECT 3
+#define PASSWORD_INCORRECT 4
+#define USER_LOGGED 5
 
 #define MAX_COMMAND_LENGTH 6
 
@@ -48,6 +54,57 @@ void generate_session_token(char* token_buff)
 {
 
 }
+
+
+int validate_login(sqlite3* db, std::string targetUsername, std::string targetPassword)
+{
+    sqlite3_stmt* stmt;
+    std::string sql = "SELECT USERNAME, PASSWORD FROM USERS WHERE NAME = ?;";
+
+    int rc = sqlite3_prepare_v2(db, sql.c_str(),-1,&stmt,nullptr);
+    sqlite3_bind_text(stmt,1,targetUsername.c_str(),-1,SQLITE_STATIC);
+
+    bool creds_correct = false;
+
+    while(sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        const unsigned char* name = sqlite3_column_text(stmt,1);
+        const unsigned char* pass = sqlite3_column_text(stmt,2);
+
+        std::string curr_user((const char*)name);
+        std::string curr_pswd((const char*)pass);
+        if(curr_user == targetUsername)
+        {
+            if(curr_pswd != targetPassword)
+            {
+                std::cout << "Wrong Password" << std::endl;
+                sqlite3_finalize(stmt);
+                return PASSWORD_INCORRECT;
+            }
+            creds_correct = true;
+        }
+    }   
+    if(!creds_correct)
+    {
+        std::cout << "Wrong Username" << std::endl;
+        sqlite3_finalize(stmt);
+        return USERNAME_INCORRECT;
+    }
+
+    for(auto& user : active_users)
+    {
+        if(user->user_name == targetUsername)
+        {
+            std::cout << "User Already logged in" << std::endl;
+            sqlite3_finalize(stmt);
+            return USER_LOGGED;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return LOGIN_SUCCESS;
+}
+
 
 void handle_client_enter(setup_user_data* data)//setup phase when the client contacts the server for the first time
 {
@@ -138,10 +195,44 @@ void handle_client_enter(setup_user_data* data)//setup phase when the client con
     {
         std::string username(buffer,username_len);
         std::string pswd(buffer + username_len,pswd_len);
+        sqlite3* db = data->db;
         if(commandType == CMD_LOGIN)
         {
-
+            //check if the username exists and if not--> send error msg..
+            char* response;
+            int isValid = validate_login(db,username,pswd);
+            if(isValid) 
+            {
+                response = "bud.. you lwky made it!, ur logged in!";
+                send(c_sock,response,strlen(response),0);
+                sqlUser_data* user_data = create_user(data,username,pswd,username_len,pswd_len);
+                handle_client_session(user_data);
+            }
+            else
+            {
+                switch (isValid){
+                    case USERNAME_INCORRECT:
+                        response = "Incorrect Username bud.. ";
+                        break;
+                    case PASSWORD_INCORRECT:
+                        response = "Incorrect Password bud.. ";
+                        break;
+                    case USER_LOGGED:
+                        response = "Someone Already logged in this account bud.. ";
+                        break;
+                }
+                send(c_sock,response,strlen(response),0);
+            }
         }
+        else if(commandType == CMD_SIGNUP)
+        {
+            
+        }
+        else
+        {
+            send(c_sock,"Wrong command.. ",strlen("Wrong command"),0);
+        }
+
     }
 
 
@@ -150,12 +241,28 @@ void handle_client_enter(setup_user_data* data)//setup phase when the client con
 }
 
 
-void add_active_user(void* data)
+sqlUser_data* create_user(setup_user_data* data,std::string username, std::string password, int username_len ,int password_len)
 {
+    char sess_token[SESSION_TOKEN_SIZE];
+    generate_session_token(sess_token);
+    sqlUser_data* new_user = new sqlUser_data;
+    new_user->db = data->db;
+    new_user->client_addr = data->client_addr;
+    new_user->client_socket = data->client_socket;
+    std::string s_token(sess_token);
+    new_user->session_token = s_token;
+    new_user->user_name = username;
+    new_user->user_name_len = username_len;
+    new_user->user_pswd = password;
+    new_user->user_pswd_len = password_len;
 
+    std::lock_guard<std::mutex> guard(active_users_mutex);
+    active_users.push_back(new_user);
+
+    return new_user;
 }
 
-void handle_client_session(void* data)
+void handle_client_session(sqlUser_data* user_data)
 {
 
 }
@@ -229,6 +336,7 @@ int main() {
         setup_user_data* new_user = new setup_user_data;
         new_user->client_addr = clientAddr;
         new_user->client_socket = clientSocket;
+        new_user->db = db;
         std::thread t(handle_client_enter, new_user);
 
         t.detach();
@@ -237,6 +345,7 @@ int main() {
 
 
     // Cleanup (usually at the end of the program)
+    sqlite3_close(db);
     closesocket(server_fd);
     WSACleanup();
     return 0;
