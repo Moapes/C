@@ -140,7 +140,7 @@ void* intro_client_stage(void* cl_data,sqlite3 *db)
                 int res = user_signup(db,recv_buff + strlen(signup));
                 if(res & SIGNUP_SUCCESS)
                 {
-
+                    
                 }
                 else if(res & SIGNUP_INVALID_USERNAME)
                 {

@@ -19,6 +19,8 @@ enum CommandID {
     CMD_LOGIN = 1,
     CMD_SIGNUP = 2,
     CMD_LOGOUT = 3,
+    CMD_CHANGE_BIO = 4,
+    CMD_EXIT = 5
 };
 
 
@@ -106,7 +108,47 @@ int validate_login(sqlite3* db, std::string targetUsername, std::string targetPa
 }
 
 
-void handle_client_enter(setup_user_data* data)//setup phase when the client contacts the server for the first time
+
+int validate_signup(sqlite3* db, std::string targetUsername, std::string targetPassword)
+{
+    sqlite3_stmt* stmt;
+    std::string sql = "SELECT USERNAME, PASSWORD FROM USERS WHERE NAME = ?;";
+    
+    int rc = sqlite3_prepare_v2(db,sql.c_str(),-1,&stmt,nullptr);
+    sqlite3_bind_text(stmt,1,targetUsername.c_str(),-1,SQLITE_STATIC);
+
+    bool creds_correct = false;
+
+    while(sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        const unsigned char* name = sqlite3_column_text(stmt,1);
+        
+        std::string curr_user((const char*)name);
+        if(targetUsername == curr_user) 
+        {
+            sqlite3_finalize(stmt);
+            return USERNAME_EXISTS;
+        }
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_stmt* create_user_stmt;
+    std::string create_user_sql = "INSERT INTO USERS (USERNAME, PASSWORD) VALUES (? , ?);";
+    int create_user_rc = sqlite3_prepare_v2(db,sql.c_str(),-1,&stmt,nullptr);
+    sqlite3_bind_text(stmt,1,targetUsername.c_str(),-1,SQLITE_STATIC);
+    sqlite3_bind_text(stmt,1,targetPassword.c_str(),-1,SQLITE_STATIC);
+
+    // 3. Execute the command
+    if (sqlite3_step(create_user_stmt) != SQLITE_DONE) {
+        std::cerr << "Error inserting user!" << std::endl;
+    } else {
+        std::cout << "User created successfully!" << std::endl;
+    }
+    sqlite3_finalize(create_user_stmt);
+    return LOGIN_SUCCESS;
+}
+
+
+void handle_client_enter(sqlite3* db,setup_user_data* data)//setup phase when the client contacts the server for the first time
 {
     int bytesReceived = 0;
     int total_bytes_recieved = 0;
@@ -206,7 +248,7 @@ void handle_client_enter(setup_user_data* data)//setup phase when the client con
                 response = "bud.. you lwky made it!, ur logged in!";
                 send(c_sock,response,strlen(response),0);
                 sqlUser_data* user_data = create_user(data,username,pswd,username_len,pswd_len);
-                handle_client_session(user_data);
+                handle_client_session(db,user_data,data);
             }
             else
             {
@@ -226,11 +268,27 @@ void handle_client_enter(setup_user_data* data)//setup phase when the client con
         }
         else if(commandType == CMD_SIGNUP)
         {
-            
+            char* response;
+            int isValid = validate_signup(db,username,pswd);
+            if(isValid) 
+            {
+                response = "bud.. you lwky made it!, ur logged in!";
+                send(c_sock,response,strlen(response),0);
+                sqlUser_data* user_data = create_user(data,username,pswd,username_len,pswd_len);
+                handle_client_session(db,user_data);
+            }
+            else
+            {
+                response = "bud .. username lwky already used";
+                send(c_sock,response,strlen(response),0);
+            }
+
         }
         else
         {
-            send(c_sock,"Wrong command.. ",strlen("Wrong command"),0);
+            char* response;
+            response = "Wrong command.. (cant logout rn btw)";
+            send(c_sock,response,strlen(response),0);
         }
 
     }
@@ -262,9 +320,114 @@ sqlUser_data* create_user(setup_user_data* data,std::string username, std::strin
     return new_user;
 }
 
-void handle_client_session(sqlUser_data* user_data)
+
+int change_user_bio(sqlite3* db,std::string username,std::string bio)
+{
+    sqlite3_stmt* bio_change_querry;
+    std::string setup_querry = "UPDATE USERS SET BIO = ? WHERE USERNAME = ?;";
+    int rc = sqlite3_prepare_v2(db,setup_querry.c_str(),-1,&bio_change_querry,nullptr);
+    if(rc != SQLITE_OK)
+    {
+        std::cout << "yo.. sum went wrong brochacho its the change bio thingy: " << std::endl;
+        sqlite3_finalize(bio_change_querry);
+        return -1;
+    }
+    sqlite3_bind_text(bio_change_querry,1,bio.c_str(),strlen(bio.c_str()),SQLITE_STATIC);
+    sqlite3_bind_text(bio_change_querry,2,username.c_str(),strlen(username.c_str()),SQLITE_STATIC);
+
+    int rc = sqlite3_step(bio_change_querry);
+    if(rc != SQLITE_OK)
+    {
+        std::cout << "yo.. sum went wrong brochacho its the change bio thingy: " << std::endl;
+        sqlite3_finalize(bio_change_querry);
+        return -1;
+    }
+    sqlite3_finalize(bio_change_querry);
+    return 1;
+}   
+
+
+std::string accumulate_input_string(setup_user_data* data,int len)
+{
+    char buf[len] = {0};
+
+    int total_bytes_recieved; int bytesRecieved;
+    while (total_bytes_recieved < len) {
+        bytesRecieved = recv(data->client_socket, buf, sizeof(buf) - 1, 0);
+        int c = 0;
+        if (bytesRecieved == SOCKET_ERROR) {
+            std::cout << "Connection error " << std::endl;
+            break;
+        }
+        if (bytesRecieved == 0) {
+            std::cout << "Client disconnected. " << std::endl;
+            break;
+        }
+        total_bytes_recieved += c;       
+    }
+    if(total_bytes_recieved < len)
+    {
+        std::cout << "Error recieving creds" << std::endl;
+    }
+    std::string final_string(buf);
+    return final_string;
+}
+
+
+void handle_client_session(sqlite3* db,sqlUser_data* user_data,setup_user_data* data)
 {
 
+    SOCKET s = user_data->client_socket;
+    int cmd;
+    int rs = recv(s,(char*)cmd,sizeof(int),0);
+    if(rs == SOCKET_ERROR)
+    {
+        std::cout << "brochacho sum wrong w the connection to user named uhh: " << user_data->user_name << std::endl;
+        return;
+    }
+    bool stop = false;
+    while(!stop)
+    {   
+        switch (cmd) 
+        {
+            case CMD_LOGOUT:
+            {
+                free(user_data);
+                handle_client_enter(db,data);
+                break;
+            }
+            case CMD_CHANGE_BIO:
+            {
+                int bio_len;
+                rs = recv(s,(char*)&bio_len,sizeof(int),0);
+                if(rs == SOCKET_ERROR)
+                {
+                    std::cout << "sum wrong bruh(abt changing bio)" << std::endl;
+                    continue;
+                }
+                std::string bio = accumulate_input_string(data,bio_len);
+                rs = change_user_bio(db,user_data->user_name,bio);
+                if(rs == -1)
+                {
+                    std::cout << "sum went wrong with change_user_bio.. " << std::endl;
+                    continue;
+                }
+                break;
+            }
+            case CMD_EXIT:
+                std::cout << "User: " << user_data->user_name << " wants to leave.. :( " << std::endl;
+                stop = ~stop;
+                break;
+            default:
+            {
+                std::cout << "vrochachooyo this aint an existing command" << std::endl;
+                break;
+            }
+        }
+    
+    }
+    free(user_data);
+    free(data);
 }
 
 
